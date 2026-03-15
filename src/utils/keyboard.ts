@@ -81,6 +81,9 @@ export class ShuangpinConfig {
       }
     });
   }
+  get zero2sp(): Map<string, string> {
+    return this.py2sp;
+  }
 
   getSp(py: string): string | null {
     const normalizedPy = py.replaceAll("v", "ü");
