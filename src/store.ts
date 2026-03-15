@@ -28,6 +28,7 @@ export const useStore = defineStore("app", {
         shuangpinMode: "小鹤双拼",
         targetSpeed: 35,      
         targetAccuracy: 95, 
+        fontSize: 28,
       },
     };
   },
