@@ -77,6 +77,7 @@ interface Settings {
   shuangpinMode: ShuangpinType;
   targetSpeed: number;    // 目标速度 (WPM/KPM)
   targetAccuracy: number; // 目标准确率 (0-100)
+  fontSize: number; // 默认值可以设为 28
 }
 
 type Theme = "auto" | "dark" | "light";

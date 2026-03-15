@@ -36,19 +36,13 @@ onDeactivated(() => {
 function resizeKeyboard() {
   const app = document.getElementById("app");
   const kbd = document.getElementById("keyboard");
-
-  // 1. 优先获取屏幕实际宽度，兜底使用 window.innerWidth
   const screenWidth = app?.clientWidth || window.innerWidth;
 
-  // 2. 如果获取不到键盘宽度，说明还没挂载，直接返回
   if (!kbd) return;
   const keyboardWidth = kbd.clientWidth;
 
   if (screenWidth < 576) {
-    // 3. 这里的 1.1 建议根据实际视觉效果调整，若要完全贴合则删掉
     let targetScale = screenWidth / keyboardWidth;
-
-    // 防止键盘太宽
     scale.value = Math.min(targetScale, 1);
   } else {
     scale.value = 1;
@@ -58,7 +52,9 @@ function resizeKeyboard() {
 function pressKey(key: string) {
   pressingKeys.value.add(key);
 
-  navigator.vibrate(100);
+  if (typeof navigator.vibrate === "function") {
+    navigator.vibrate(50);
+  }
 }
 
 function send() {
@@ -198,7 +194,7 @@ function keyItemClass(key: string) {
 
   .key-spacer {
     width: 40px;
-    flex-shrink: 0; 
+    flex-shrink: 0;
   }
 }
 </style>
