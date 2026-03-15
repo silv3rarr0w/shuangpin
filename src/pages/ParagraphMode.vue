@@ -297,7 +297,11 @@ function shortPinyin(pinyins: string[]) {
       </div>
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
-          <p v-for="(p, i) in article.text" :key="i">
+          <p
+            v-for="(p, i) in article.text"
+            :key="i"
+            :style="{ fontSize: settings.fontSize + 'px' }"
+          >
             <span
               v-for="([s, t], si) in p"
               :key="si"
@@ -507,6 +511,12 @@ function shortPinyin(pinyins: string[]) {
           height: 30vh;
         }
 
+        p {
+          line-height: 1.5;
+          margin-bottom: 0.8em;
+          word-break: break-all;
+        }
+
         .bg-text {
           opacity: 0.4;
         }
@@ -517,8 +527,10 @@ function shortPinyin(pinyins: string[]) {
 
         .current-text {
           text-decoration: underline;
-          text-underline-offset: 2px;
-          opacity: 0.8;
+          text-underline-offset: 4px;
+          opacity: 1;
+          font-weight: 900;
+          color: @primary-color;
         }
       }
     }
