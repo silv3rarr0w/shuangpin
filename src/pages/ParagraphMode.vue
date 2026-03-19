@@ -453,8 +453,9 @@ function shortPinyin(pinyins: string[]) {
 </script>
 
 <template>
-  <div class="p-mode">
-    <!-- 顶部区域保持不变：文章标题和菜单 -->
+  <!-- 根元素绑定字体大小，以响应全局设置 -->
+  <div class="p-mode" :style="{ fontSize: settings.fontSize }">
+    <!-- 顶部区域：文章标题和菜单 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
         <div class="pinyin">
@@ -492,7 +493,7 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
-      <!-- 当前段文字显示区域（高度已增加） -->
+      <!-- 当前段文字显示区域 -->
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
           <p>
@@ -533,9 +534,9 @@ function shortPinyin(pinyins: string[]) {
       </div>
     </div>
 
-    <!-- 底部控制区：虚拟键盘 + 指标栏（置于键盘上方） -->
+    <!-- 底部控制区：指标栏 + 虚拟键盘 -->
     <div class="bottom-area">
-      <!-- 指标栏 -->
+      <!-- 指标栏（暗黑模式已通过 CSS 变量适配） -->
       <div class="criteria-bar" v-if="!isEditing">
         <div class="criteria-item">
           <span class="criteria-label">指标</span>
@@ -578,11 +579,11 @@ function shortPinyin(pinyins: string[]) {
         </template>
       </div>
 
-      <!-- 虚拟键盘（缩小版） -->
+      <!-- 虚拟键盘（进一步缩小） -->
       <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" class="small-keyboard" />
     </div>
 
-    <!-- 统计摘要（仍固定在右下角） -->
+    <!-- 统计摘要（固定在右下角） -->
     <div v-if="!isEditing" class="summary">
       <TypeSummary
         :speed="summary.hanziPerMinutes"
@@ -864,7 +865,8 @@ function shortPinyin(pinyins: string[]) {
           color: var(--black);
         }
 
-        .criteria-input {
+        .criteria-input,
+        .criteria-select {
           width: 70px;
           padding: 4px;
           border: 1px solid var(--gray-c);
@@ -872,19 +874,23 @@ function shortPinyin(pinyins: string[]) {
           background: var(--white);
           color: var(--black);
           font-size: 14px;
+          transition: all 0.2s;
 
           @media (max-width: 576px) {
             width: 60px;
           }
+
+          // 暗黑模式适配（通过 CSS 变量自动切换）
+          &:focus {
+            border-color: @primary-color;
+            outline: none;
+            box-shadow: 0 0 0 2px fade(@primary-color, 20%);
+          }
         }
 
         .criteria-select {
-          padding: 4px;
-          border: 1px solid var(--gray-c);
-          border-radius: 4px;
-          background: var(--white);
-          color: var(--black);
-          font-size: 14px;
+          width: auto;
+          min-width: 80px;
         }
 
         .switch {
@@ -935,23 +941,44 @@ function shortPinyin(pinyins: string[]) {
       }
     }
 
-    // 缩小虚拟键盘
+    // 进一步缩小虚拟键盘
     .small-keyboard {
-      transform: scale(0.8);
+      transform: scale(0.7);
       transform-origin: bottom center;
-      margin-bottom: -10px; // 补偿缩放造成的空白
+      margin-bottom: -15px; // 补偿缩放造成的空白
+
+      // 缩小键盘内部文字（通过深度选择器覆盖 Keyboard 组件的样式）
+      :deep(.key-item) {
+        .main-key {
+          font-size: 1.2rem;
+        }
+        .follow-key,
+        .lead-key {
+          font-size: 0.8rem;
+        }
+      }
     }
   }
 
   .summary {
     position: absolute;
     right: var(--app-padding);
-    bottom: 120px; // 调整位置，避免被底部区域遮挡
-    z-index: 10;
+    bottom: 140px; // 调整到底部栏上方
+    z-index: 1000; // 确保不被覆盖
+    background: var(--white);
+    padding: 8px 16px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--gray-e0);
 
     @media (max-width: 576px) {
       top: 36px;
       bottom: auto;
+      right: auto;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90%;
+      text-align: center;
     }
   }
 }
