@@ -2,26 +2,60 @@
 import Pinyin from "../components/Pinyin.vue";
 import Keyboard from "../components/Keyboard.vue";
 import TypeSummary from "../components/TypeSummary.vue";
+import MenuList from "../components/MenuList.vue";
 
 import {
   ref,
+  watch,
   watchPostEffect,
   onActivated,
   onDeactivated,
-  watchEffect,
+  onMounted,
   computed,
-  watch,
-  nextTick, // 新增导入
 } from "vue";
 import { useStore } from "../store";
 import { storeToRefs } from "pinia";
 
 import rawArticles from "../utils/article.json";
-import { getPinyinOf, isValidHanzi } from "../utils/hanzi";
+import { getPinyinOf, hanziMap } from "../utils/hanzi";
 import { matchSpToPinyin } from "../utils/keyboard";
 import { TypingSummary } from "../utils/summary";
-import MenuList from "../components/MenuList.vue";
 
+// ---------- 新增：指标配置（持久化到 localStorage） ----------
+interface CriteriaConfig {
+  open: boolean;           // 是否开启指标监测
+  speed: number;           // 速度阈值（字/分），≤0表示不检查
+  accuracy: number;        // 键准阈值（%），≤0表示不检查
+  pressPerHanzi: number;   // 每字击键阈值，≤0表示不检查
+  action: 'noop' | 'retry' | 'shuffle'; // 未达标时的动作
+}
+
+const criteria = ref<CriteriaConfig>({
+  open: false,
+  speed: 200,
+  accuracy: 95,
+  pressPerHanzi: 3,
+  action: 'noop',
+});
+
+// 从 localStorage 加载配置
+onMounted(() => {
+  const saved = localStorage.getItem('paragraph-criteria');
+  if (saved) {
+    try {
+      criteria.value = JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to load criteria config', e);
+    }
+  }
+});
+
+// 保存配置到 localStorage
+watch(criteria, (val) => {
+  localStorage.setItem('paragraph-criteria', JSON.stringify(val));
+}, { deep: true });
+
+// ---------- 原有代码 ----------
 const store = useStore();
 const articles = storeToRefs(store).articles;
 const settings = storeToRefs(store).settings;
@@ -40,8 +74,9 @@ onDeactivated(() => {
   document.removeEventListener("keypress", onKeyPressed);
 });
 
+// 初始化文章列表（从 rawArticles 和 localStorage 加载）
 (function checkArticles() {
-  const rawNames = new Set(Object.keys(rawArticles));
+  const rawNames = new Set([...Object.keys(rawArticles)]);
   articles.value.forEach((v) => {
     rawNames.delete(v.type);
   });
@@ -51,8 +86,8 @@ onDeactivated(() => {
     const progress: Progress = {
       currentIndex: 0,
       total: rawArticles[name].length,
-      history: [],
-      correctSum: 0,
+      correctTry: 0,
+      totalTry: 0,
     };
 
     articles.value.push({ progress, type: name });
@@ -62,7 +97,6 @@ onDeactivated(() => {
 function loadArticleText(article: Article) {
   if (article.type === "CUSTOM") {
     const text = localStorage.getItem(article.name) ?? "";
-
     return {
       type: article.type,
       text,
@@ -80,36 +114,37 @@ function loadArticleText(article: Article) {
 }
 
 function jumpToNextValidHanzi(index: number, text: string) {
-  while (index < text.length && !isValidHanzi(text[index])) {
+  while (index < text.length && !hanziMap.h2p.has(text[index])) {
     index += 1;
   }
   return index;
 }
 
 const index = storeToRefs(store).currentArticleIndex;
+
+// ---------- 新增：用于乱序后存储打乱文本的引用 ----------
+const shuffledTextRef = ref<string | null>(null);
+
+// 构建文章显示结构（二维数组，每个元素为 [字符, 相对位置]）
+function buildArticleText(text: string) {
+  return text.split('\n').map(line => line.split('').map((char, idx) => [char, idx]));
+}
+
 const article = computed(() => {
   const articleIndex = index.value % articles.value.length;
-
   const info = loadArticleText(articles.value[articleIndex]);
 
   info.progress.currentIndex = jumpToNextValidHanzi(
     info.progress.currentIndex,
-    info.text,
+    info.text
   );
 
   const currentHanzi = info.text[info.progress.currentIndex] ?? "";
   const pinyin = getPinyinOf(currentHanzi);
 
-  // 分段（自然段）
-  let text: [[string, number][]] = [[]];
-  for (let i = 0; i < info.text.length; ++i) {
-    const char = info.text[i];
-    if (char === "\n") {
-      text.push([]);
-    } else {
-      text.at(-1)?.push([char, i - info.progress.currentIndex]);
-    }
-  }
+  // 使用乱序文本（如果有）否则使用原始文本
+  const baseText = shuffledTextRef.value ?? info.text;
+  const text = buildArticleText(baseText);
 
   return {
     type: info.type,
@@ -119,6 +154,7 @@ const article = computed(() => {
     spHints: (store.mode().py2sp.get(pinyin.at(0) ?? "") ?? "").split(""),
     progress: info.progress,
     name: info.name,
+    originalText: info.text, // 保留原始文本，用于乱序
   };
 });
 
@@ -141,131 +177,13 @@ const validInput = computed(() => {
   return editingTitle.value.length > 0 && editingContent.value.length > 0;
 });
 
-// ========== 分段练习设置 ==========
-const enableSegment = ref(false);
-const segmentSize = ref(10);
-const thresholdSpeed = ref(50);
-const thresholdAccuracy = ref(100);
-const thresholdPress = ref(3);
-const thresholdAction = ref<"shuffle" | "retry" | "none">("shuffle");
-
-const fullText = ref("");
-const segments = ref<Array<{ start: number; end: number }>>([]);
-const currentSegmentIndex = ref(0);
-const segmentStartStats = ref({
-  totalChars: 0,
-  totalKeys: 0,
-  totalErrors: 0,
-  time: 0,
-});
-
-const totalSegments = computed(() => segments.value.length);
-
-function buildSegments(text: string, size: number) {
-  const segs = [];
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(start + size, text.length);
-    segs.push({ start, end });
-    start = end;
-  }
-  return segs;
-}
-
-async function initSegmentsIfEnabled() {
-  if (!enableSegment.value) return;
-  const info = loadArticleText(articles.value[index.value]);
-  fullText.value = info.text;
-  segments.value = buildSegments(fullText.value, segmentSize.value);
-  currentSegmentIndex.value = 0;
-  // 确保当前索引位于第一段开头
-  article.value.progress.currentIndex = segments.value[0].start;
-  recordSegmentStart();
-  console.log('分段初始化完成，总段数：', segments.value.length); // 调试用
-}
-
-function recordSegmentStart() {
-  segmentStartStats.value = {
-    totalChars: summary.value.totalValidMatches || 0,
-    totalKeys: summary.value.totalPressCount || 0,
-    totalErrors: (summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0),
-    time: Date.now(),
-  };
-  console.log('记录段起始统计', segmentStartStats.value); // 调试用
-}
-
-function checkSegment达标() {
-  const now = Date.now();
-  const timeDelta = (now - segmentStartStats.value.time) / 1000 / 60;
-  const charsDelta = (summary.value.totalValidMatches || 0) - segmentStartStats.value.totalChars;
-  const keysDelta = (summary.value.totalPressCount || 0) - segmentStartStats.value.totalKeys;
-  const errorsDelta = ((summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0)) - segmentStartStats.value.totalErrors;
-
-  if (charsDelta === 0) return true;
-  const speed = charsDelta / timeDelta;
-  const accuracy = (charsDelta - errorsDelta) / charsDelta;
-  const pressPerChar = keysDelta / charsDelta;
-  const speedOK = speed >= thresholdSpeed.value;
-  const accOK = accuracy * 100 >= thresholdAccuracy.value;
-  const pressOK = pressPerChar <= thresholdPress.value;
-
-  console.log(`段达标检查：速度=${speed.toFixed(2)}/${thresholdSpeed.value}，准确率=${(accuracy*100).toFixed(2)}/${thresholdAccuracy.value}，击键=${pressPerChar.toFixed(2)}/${thresholdPress.value}，结果=${speedOK && accOK && pressOK}`);
-  return speedOK && accOK && pressOK;
-}
-
-function handleSegmentEnd() {
-  const is达标 = checkSegment达标();
-  console.log(`段结束，达标：${is达标}，当前段索引：${currentSegmentIndex.value}`);
-  if (!is达标) {
-    switch (thresholdAction.value) {
-      case "shuffle": {
-        const remainingSegments = segments.value.slice(currentSegmentIndex.value + 1);
-        shuffleArray(remainingSegments);
-        segments.value = [
-          ...segments.value.slice(0, currentSegmentIndex.value + 1),
-          ...remainingSegments,
-        ];
-        console.log('乱序剩余段落');
-        moveToNextSegment();
-        break;
-      }
-      case "retry":
-        console.log('重打当前段');
-        article.value.progress.currentIndex = segments.value[currentSegmentIndex.value].start;
-        recordSegmentStart(); // 重置统计快照
-        break;
-      case "none":
-      default:
-        moveToNextSegment();
-        break;
-    }
-  } else {
-    moveToNextSegment();
-  }
-}
-
-function moveToNextSegment() {
-  if (currentSegmentIndex.value + 1 < segments.value.length) {
-    currentSegmentIndex.value++;
-    article.value.progress.currentIndex = segments.value[currentSegmentIndex.value].start;
-    recordSegmentStart();
-    console.log(`进入下一段，当前段索引：${currentSegmentIndex.value}`);
-  } else {
-    console.log('所有段落完成');
-  }
-}
-
-function shuffleArray<T>(arr: T[]) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-// ========== 结束 ==========
-
 function onAriticleChange(i: number) {
   index.value = i;
   isEditing.value = i >= articles.value.length;
+  // 切换文章时清除乱序状态
+  shuffledTextRef.value = null;
+  // 重置统计数据
+  summary.value = new TypingSummary();
 }
 
 const pinyin = ref<string[]>([]);
@@ -277,7 +195,7 @@ function onSeq([lead, follow]: [string?, string?]) {
       store.mode(),
       lead as Char,
       follow as Char,
-      answer,
+      answer
     );
     pinyin.value = [res.lead, res.follow].filter((v) => !!v);
 
@@ -317,27 +235,102 @@ watchPostEffect(() => {
   if (isValidPinyin.value) {
     setTimeout(() => {
       pinyin.value = [];
-      const nextIndex = article.value.progress.currentIndex + 1;
-      article.value.progress.currentIndex = nextIndex;
+      article.value.progress.currentIndex += 1;
       isValidPinyin.value = false;
-
-      // 分段检测
-      if (enableSegment.value && segments.value.length > 0) {
-        const currentSegment = segments.value[currentSegmentIndex.value];
-        if (nextIndex >= currentSegment.end) {
-          console.log(`到达段尾：当前索引 ${nextIndex} >= 段尾 ${currentSegment.end}`);
-          handleSegmentEnd();
-        }
-      }
     }, 30);
   }
 });
 
-watchEffect(() => {
-  if (article.value.progress.currentIndex >= article.value.progress.total) {
-    article.value.progress.currentIndex = 0;
+// ---------- 移除原有的自动重置 watchEffect，改用自定义完成检测 ----------
+// watchEffect(() => {
+//   if (article.value.progress.currentIndex >= article.value.progress.total) {
+//     article.value.progress.currentIndex = 0;
+//   }
+// });
+
+// 监听当前索引，检测是否完成一篇文章
+watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
+  // 当从小于总数变为大于等于总数时，表示刚完成一篇文章
+  if (oldVal < article.value.progress.total && newVal >= article.value.progress.total) {
+    handleArticleFinish();
   }
 });
+
+// 文章完成时的处理
+function handleArticleFinish() {
+  // 如果未开启指标，直接重置进度并重新开始
+  if (!criteria.value.open) {
+    article.value.progress.currentIndex = 0;
+    summary.value = new TypingSummary();
+    return;
+  }
+
+  // 获取当前文章的统计数据
+  const speed = summary.value.hanziPerMinutes;
+  const accuracy = summary.value.accuracy * 100; // 转换为百分比
+  const pressPerHanzi = summary.value.pressPerHanzi;
+
+  // 检查是否达标
+  let meet = true;
+  if (criteria.value.speed > 0 && speed < criteria.value.speed) meet = false;
+  if (criteria.value.accuracy > 0 && accuracy < criteria.value.accuracy) meet = false;
+  if (criteria.value.pressPerHanzi > 0 && pressPerHanzi > criteria.value.pressPerHanzi) meet = false;
+
+  if (!meet) {
+    // 未达标，根据配置执行动作
+    switch (criteria.value.action) {
+      case 'retry':
+        // 重打：重置进度到开头
+        article.value.progress.currentIndex = 0;
+        break;
+      case 'shuffle':
+        // 乱序：打乱文章内容
+        shuffleArticle();
+        break;
+      case 'noop':
+        // 不处理，正常进入下一轮
+        article.value.progress.currentIndex = 0;
+        break;
+    }
+  } else {
+    // 达标，正常重置进度
+    article.value.progress.currentIndex = 0;
+  }
+
+  // 无论达标与否，重置统计数据（下一轮重新累计）
+  summary.value = new TypingSummary();
+}
+
+// 乱序文章
+function shuffleArticle() {
+  const original = article.value.originalText;
+  // 按换行符分割段落
+  const paragraphs = original.split('\n');
+  const lengths = paragraphs.map(p => p.length);
+
+  // 将所有字符打平并打乱
+  const allChars = original.split('');
+  for (let i = allChars.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allChars[i], allChars[j]] = [allChars[j], allChars[i]];
+  }
+
+  // 按原段落长度重新分配字符
+  let newParagraphs: string[] = [];
+  let start = 0;
+  for (let len of lengths) {
+    const end = start + len;
+    newParagraphs.push(allChars.slice(start, end).join(''));
+    start = end;
+  }
+
+  // 用换行符连接成新文本
+  const shuffled = newParagraphs.join('\n');
+  shuffledTextRef.value = shuffled;
+
+  // 重置进度
+  article.value.progress.currentIndex = 0;
+}
 
 function getShortName(s: string, n = 10) {
   let ret = s.slice(0, n);
@@ -358,8 +351,8 @@ function saveArticle() {
     progress: {
       currentIndex: 0,
       total: editingContent.value.length,
-      history: [],
-      correctSum: 0,
+      correctTry: 0,
+      totalTry: 0,
     },
   });
 
@@ -384,27 +377,44 @@ function shortPinyin(pinyins: string[]) {
   }
   return ret.join("/");
 }
-
-// 监听文章切换，当进入非编辑模式且开启分段时，初始化分段
-watch(index, async () => {
-  if (!isEditing.value && enableSegment.value) {
-    await nextTick(); // 确保 article 已更新
-    initSegmentsIfEnabled();
-  }
-});
-
-// 监听开启分段开关的变化，如果当前已在非编辑模式，重新初始化
-watch(enableSegment, (newVal) => {
-  if (!isEditing.value && newVal) {
-    nextTick(() => {
-      initSegmentsIfEnabled();
-    });
-  }
-});
 </script>
 
 <template>
   <div class="p-mode">
+    <!-- 新增：指标设置栏（非编辑模式下显示） -->
+    <div class="criteria-bar" v-if="!isEditing">
+      <div class="criteria-item">
+        <span class="criteria-label">指标</span>
+        <label class="switch">
+          <input type="checkbox" v-model="criteria.open" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <template v-if="criteria.open">
+        <div class="criteria-item">
+          <span class="criteria-label">速度≥</span>
+          <input type="number" v-model.number="criteria.speed" min="0" step="10" class="criteria-input" />
+        </div>
+        <div class="criteria-item">
+          <span class="criteria-label">键准≥</span>
+          <input type="number" v-model.number="criteria.accuracy" min="0" max="100" step="1" class="criteria-input" />
+        </div>
+        <div class="criteria-item">
+          <span class="criteria-label">每字击键≤</span>
+          <input type="number" v-model.number="criteria.pressPerHanzi" min="0" step="0.1" class="criteria-input" />
+        </div>
+        <div class="criteria-item">
+          <span class="criteria-label">未达标时</span>
+          <select v-model="criteria.action" class="criteria-select">
+            <option value="noop">不处理</option>
+            <option value="retry">重打</option>
+            <option value="shuffle">乱序</option>
+          </select>
+        </div>
+      </template>
+    </div>
+
+    <!-- 原有显示区域 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
         <div class="pinyin">
@@ -443,13 +453,10 @@ watch(enableSegment, (newVal) => {
         </div>
       </div>
 
+      <!-- 文章正文显示区域 -->
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
-          <p
-            v-for="(p, i) in article.text"
-            :key="i"
-            :style="{ fontSize: settings.fontSize + 'px' }"
-          >
+          <p v-for="(p, i) in article.text" :key="i">
             <span
               v-for="([s, t], si) in p"
               :key="si"
@@ -461,11 +468,9 @@ watch(enableSegment, (newVal) => {
             </span>
           </p>
         </div>
-        <div v-if="enableSegment" class="segment-progress">
-          第 {{ currentSegmentIndex + 1 }} / {{ totalSegments }} 段
-        </div>
       </div>
 
+      <!-- 编辑区域（新建文章时） -->
       <div v-else class="editing-text-area">
         <div class="editing-bar">
           <input
@@ -486,54 +491,17 @@ watch(enableSegment, (newVal) => {
           class="editing-text"
           placeholder="键入范文……"
         />
-
-        <div class="segment-settings" v-if="isEditing">
-          <h4>分段练习设置</h4>
-          <div class="setting-row">
-            <span class="setting-label">开启分段练习</span>
-            <label class="switch">
-              <input type="checkbox" v-model="enableSegment" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <template v-if="enableSegment">
-            <div class="setting-row">
-              <span class="setting-label">每段字数</span>
-              <input type="number" v-model.number="segmentSize" min="10" max="1000" class="native-input" />
-            </div>
-            <div class="setting-row">
-              <span class="setting-label">速度下限（字/分）</span>
-              <input type="number" v-model.number="thresholdSpeed" min="0" max="500" class="native-input" />
-            </div>
-            <div class="setting-row">
-              <span class="setting-label">准确率下限（%）</span>
-              <input type="number" v-model.number="thresholdAccuracy" min="0" max="100" class="native-input" />
-            </div>
-            <div class="setting-row">
-              <span class="setting-label">击键上限（次/字）</span>
-              <input type="number" v-model.number="thresholdPress" min="0" max="10" step="0.1" class="native-input" />
-            </div>
-            <div class="setting-row">
-              <span class="setting-label">未达标时操作</span>
-              <select v-model="thresholdAction" class="native-select">
-                <option value="shuffle">乱序</option>
-                <option value="retry">重打当前段</option>
-                <option value="none">不处理</option>
-              </select>
-            </div>
-            <div class="setting-note">
-              * 当任何一项指标未达标时触发所选操作。
-            </div>
-          </template>
-        </div>
       </div>
     </div>
 
+    <!-- 虚拟键盘（非编辑模式） -->
     <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" />
+
+    <!-- 实时统计摘要 -->
     <div v-if="!isEditing" class="summary">
       <TypeSummary
         :speed="summary.hanziPerMinutes"
-        :accuracy="summary.totalAccuracy"
+        :accuracy="summary.accuracy"
         :avgpress="summary.pressPerHanzi"
       />
     </div>
@@ -544,74 +512,105 @@ watch(enableSegment, (newVal) => {
 @import "../styles/color.less";
 @import "../styles/var.less";
 
-/* 原生开关样式 */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 20px;
-  background-color: #ccc;
-  border-radius: 20px;
-  cursor: pointer;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.4s;
-  border-radius: 20px;
-}
-
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 16px;
-  width: 16px;
-  left: 2px;
-  bottom: 2px;
-  background-color: white;
-  transition: 0.4s;
-  border-radius: 50%;
-}
-
-input:checked + .slider {
-  background-color: @primary-color;
-}
-
-input:checked + .slider:before {
-  transform: translateX(20px);
-}
-
-/* 原生输入框样式 */
-.native-input,
-.native-select {
-  width: 140px;
-  padding: 4px 8px;
-  border: 1px solid var(--gray-010);
-  border-radius: 4px;
-  font-size: 14px;
-  background-color: var(--white);
-  color: var(--black);
-}
-
-.native-input:focus,
-.native-select:focus {
-  outline: none;
-  border-color: @primary-color;
-}
-
 .p-mode {
+  .criteria-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 1rem;
+    background: var(--gray-f8);
+    border-bottom: 1px solid var(--gray-e0);
+    font-size: 14px;
+
+    @media (max-width: 576px) {
+      padding: 0.5rem;
+      gap: 0.5rem;
+    }
+
+    .criteria-item {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+
+      .criteria-label {
+        white-space: nowrap;
+        color: var(--black);
+      }
+
+      .criteria-input {
+        width: 70px;
+        padding: 4px;
+        border: 1px solid var(--gray-c);
+        border-radius: 4px;
+        background: var(--white);
+        color: var(--black);
+        font-size: 14px;
+
+        @media (max-width: 576px) {
+          width: 60px;
+        }
+      }
+
+      .criteria-select {
+        padding: 4px;
+        border: 1px solid var(--gray-c);
+        border-radius: 4px;
+        background: var(--white);
+        color: var(--black);
+        font-size: 14px;
+      }
+
+      /* 简单的开关样式 */
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 40px;
+        height: 20px;
+        margin-left: 4px;
+
+        input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: var(--gray-c);
+          transition: 0.3s;
+          border-radius: 20px;
+
+          &:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+          }
+        }
+
+        input:checked + .slider {
+          background-color: @primary-color;
+        }
+
+        input:checked + .slider:before {
+          transform: translateX(20px);
+        }
+      }
+    }
+  }
+
+  // 其余原有样式保持不变...
   .display-area {
     padding: 0 64px 32px 32px;
     display: flex;
@@ -657,9 +656,8 @@ input:checked + .slider:before {
           font-size: 20px;
           margin-right: 16px;
           font-weight: bold;
-          @border: 1px solid var(--black);
-          border-top: @border;
-          border-bottom: @border;
+          border-top: 1px solid var(--black);
+          border-bottom: 1px solid var(--black);
         }
       }
 
@@ -673,6 +671,7 @@ input:checked + .slider:before {
         .title {
           max-width: 160px;
           text-align: right;
+
           @media (max-width: 576px) {
             max-width: 100vw;
           }
@@ -688,6 +687,7 @@ input:checked + .slider:before {
     .p-title:hover,
     .p-title.editing {
       flex-direction: column;
+
       @media (max-width: 576px) {
         align-items: center;
       }
@@ -765,12 +765,6 @@ input:checked + .slider:before {
           height: 30vh;
         }
 
-        p {
-          line-height: 1.5;
-          margin-bottom: 0.8em;
-          word-break: break-all;
-        }
-
         .bg-text {
           opacity: 0.4;
         }
@@ -781,18 +775,9 @@ input:checked + .slider:before {
 
         .current-text {
           text-decoration: underline;
-          text-underline-offset: 4px;
-          opacity: 1;
-          font-weight: 900;
-          color: @primary-color;
+          text-underline-offset: 2px;
+          opacity: 0.8;
         }
-      }
-
-      .segment-progress {
-        text-align: right;
-        font-size: 12px;
-        color: var(--gray-6);
-        margin-top: 4px;
       }
     }
 
@@ -802,14 +787,10 @@ input:checked + .slider:before {
       margin-top: 40px;
       width: 50vw;
       max-width: calc(0.6 * var(--page-max-width));
-      max-height: 80vh;
-      overflow-y: auto;
-      padding-right: 8px;
 
       @media (max-width: 576px) {
         width: 100vw;
         max-width: calc(100vw - var(--app-padding) * 2);
-        max-height: 70vh;
       }
 
       .editing-bar {
@@ -845,55 +826,18 @@ input:checked + .slider:before {
         font-family: inherit;
         font-size: 14px;
         font-weight: bold;
+        border: 0;
         outline: none;
         padding: 8px;
-        height: 150px;
-        resize: vertical;
+        height: calc(var(--page-height) - 200px);
+        resize: none;
         border: 3px double var(--gray-6);
         color: var(--black);
         background-color: transparent;
         padding-left: 10px;
 
         @media (max-width: 576px) {
-          height: 120px;
-        }
-      }
-
-      .segment-settings {
-        background-color: var(--white);
-        border: 1px solid var(--gray-010);
-        padding: 16px;
-        margin-top: 20px;
-        border-radius: 4px;
-        font-size: 14px;
-
-        h4 {
-          margin: 0 0 12px 0;
-          font-size: 16px;
-          font-weight: bold;
-        }
-
-        .setting-row {
-          display: flex;
-          align-items: center;
-          margin-bottom: 12px;
-
-          .setting-label {
-            width: 120px;
-            flex-shrink: 0;
-          }
-
-          .switch,
-          .native-input,
-          .native-select {
-            margin-left: 8px;
-          }
-        }
-
-        .setting-note {
-          color: var(--gray-6);
-          font-size: 12px;
-          margin-top: 8px;
+          height: calc(var(--page-height) - 300px);
         }
       }
     }
@@ -903,6 +847,7 @@ input:checked + .slider:before {
     position: absolute;
     right: var(--app-padding);
     bottom: var(--app-padding);
+
     @media (max-width: 576px) {
       top: 36px;
     }
