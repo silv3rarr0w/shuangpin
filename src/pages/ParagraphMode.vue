@@ -3,9 +3,6 @@ import Pinyin from "../components/Pinyin.vue";
 import Keyboard from "../components/Keyboard.vue";
 import TypeSummary from "../components/TypeSummary.vue";
 
-// 显式导入 Element Plus 组件
-import { ElSwitch, ElInputNumber, ElSelect, ElOption } from 'element-plus';
-
 import {
   ref,
   watchPostEffect,
@@ -81,9 +78,6 @@ function loadArticleText(article: Article) {
   };
 }
 
-/**
- * 跳转到下一个有效的汉字（即在拼音库中存在的汉字）
- */
 function jumpToNextValidHanzi(index: number, text: string) {
   while (index < text.length && !isValidHanzi(text[index])) {
     index += 1;
@@ -146,7 +140,7 @@ const validInput = computed(() => {
   return editingTitle.value.length > 0 && editingContent.value.length > 0;
 });
 
-// ========== 新增：分段练习设置 ==========
+// ========== 新增：分段练习设置（使用原生元素）==========
 const enableSegment = ref(false);               // 是否开启分段练习
 const segmentSize = ref(50);                    // 每段字数（默认50）
 const thresholdSpeed = ref(100);                 // 速度下限（字/分）
@@ -154,21 +148,18 @@ const thresholdAccuracy = ref(95);               // 准确率下限（%）
 const thresholdPress = ref(2.5);                 // 平均击键上限（次/字）
 const thresholdAction = ref<"shuffle" | "retry" | "none">("shuffle"); // 未达标操作
 
-// 分段相关状态（仅在练习时使用）
 const fullText = ref("");                         // 原始文章全文
 const segments = ref<Array<{ start: number; end: number }>>([]); // 分段起止索引
 const currentSegmentIndex = ref(0);                // 当前段索引
-const segmentStartStats = ref({                     // 段开始时记录的统计快照
+const segmentStartStats = ref({
   totalChars: 0,
   totalKeys: 0,
   totalErrors: 0,
   time: 0,
 });
 
-// 计算总段数
 const totalSegments = computed(() => segments.value.length);
 
-// 根据全文和每段字数生成分段
 function buildSegments(text: string, size: number) {
   const segs = [];
   let start = 0;
@@ -180,71 +171,58 @@ function buildSegments(text: string, size: number) {
   return segs;
 }
 
-// 在开始练习时初始化分段（如果开启）
 function initSegmentsIfEnabled() {
   if (!enableSegment.value) return;
-  // 从当前文章获取全文
   const info = loadArticleText(articles.value[index.value]);
   fullText.value = info.text;
   segments.value = buildSegments(fullText.value, segmentSize.value);
   currentSegmentIndex.value = 0;
-  // 重置进度索引到当前段起点
   article.value.progress.currentIndex = segments.value[0].start;
-  // 记录段起始统计
   recordSegmentStart();
 }
 
-// 记录当前段起始时的统计快照
 function recordSegmentStart() {
   segmentStartStats.value = {
-    totalChars: summary.value.totalValidMatches || 0,   // 已输入字数
-    totalKeys: summary.value.totalPressCount || 0,      // 总按键数
-    totalErrors: (summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0), // 错误次数
+    totalChars: summary.value.totalValidMatches || 0,
+    totalKeys: summary.value.totalPressCount || 0,
+    totalErrors: (summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0),
     time: Date.now(),
   };
 }
 
-// 检查当前段是否达标，返回是否达标
 function checkSegment达标() {
   const now = Date.now();
-  const timeDelta = (now - segmentStartStats.value.time) / 1000 / 60; // 分钟
+  const timeDelta = (now - segmentStartStats.value.time) / 1000 / 60;
   const charsDelta = (summary.value.totalValidMatches || 0) - segmentStartStats.value.totalChars;
   const keysDelta = (summary.value.totalPressCount || 0) - segmentStartStats.value.totalKeys;
   const errorsDelta = ((summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0)) - segmentStartStats.value.totalErrors;
 
-  if (charsDelta === 0) return true; // 未打任何字，视为达标（避免除零）
-
-  const speed = charsDelta / timeDelta;                 // 字/分
-  const accuracy = (charsDelta - errorsDelta) / charsDelta; // 准确率
-  const pressPerChar = keysDelta / charsDelta;          // 平均击键
-
+  if (charsDelta === 0) return true;
+  const speed = charsDelta / timeDelta;
+  const accuracy = (charsDelta - errorsDelta) / charsDelta;
+  const pressPerChar = keysDelta / charsDelta;
   const speedOK = speed >= thresholdSpeed.value;
   const accOK = accuracy * 100 >= thresholdAccuracy.value;
   const pressOK = pressPerChar <= thresholdPress.value;
-
   return speedOK && accOK && pressOK;
 }
 
-// 处理段结束：根据阈值执行操作
 function handleSegmentEnd() {
   const is达标 = checkSegment达标();
   if (!is达标) {
     switch (thresholdAction.value) {
-      case "shuffle":
-        // 乱序剩余段落（不包括当前已完成段）
+      case "shuffle": {
         const remainingSegments = segments.value.slice(currentSegmentIndex.value + 1);
         shuffleArray(remainingSegments);
         segments.value = [
           ...segments.value.slice(0, currentSegmentIndex.value + 1),
           ...remainingSegments,
         ];
-        // 继续进入下一段
         moveToNextSegment();
         break;
+      }
       case "retry":
-        // 重打当前段：重置索引到当前段起点
         article.value.progress.currentIndex = segments.value[currentSegmentIndex.value].start;
-        // 清空输入缓存（pinyin 重置由外部处理）
         break;
       case "none":
       default:
@@ -256,18 +234,14 @@ function handleSegmentEnd() {
   }
 }
 
-// 进入下一段
 function moveToNextSegment() {
   if (currentSegmentIndex.value + 1 < segments.value.length) {
     currentSegmentIndex.value++;
     article.value.progress.currentIndex = segments.value[currentSegmentIndex.value].start;
     recordSegmentStart();
-  } else {
-    // 所有段落完成，可触发结束（现有逻辑会处理）
   }
 }
 
-// 工具：打乱数组
 function shuffleArray<T>(arr: T[]) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -334,11 +308,9 @@ watchPostEffect(() => {
       article.value.progress.currentIndex = nextIndex;
       isValidPinyin.value = false;
 
-      // 新增：如果开启了分段练习，检查是否到达段尾
       if (enableSegment.value && segments.value.length > 0) {
         const currentSegment = segments.value[currentSegmentIndex.value];
         if (nextIndex >= currentSegment.end) {
-          // 当前段结束
           handleSegmentEnd();
         }
       }
@@ -357,7 +329,6 @@ function getShortName(s: string, n = 10) {
   if (s.length > n) {
     ret = ret.slice(0, n - 2) + "...";
   }
-
   return ret;
 }
 
@@ -399,10 +370,8 @@ function shortPinyin(pinyins: string[]) {
   return ret.join("/");
 }
 
-// 当文章切换或开始练习时，如果开启分段则初始化分段
 watch(index, () => {
   if (!isEditing.value && enableSegment.value) {
-    // 延迟等待 article 计算完成
     setTimeout(() => {
       initSegmentsIfEnabled();
     }, 0);
@@ -450,37 +419,40 @@ watch(index, () => {
         </div>
       </div>
 
-      <!-- 分段练习设置面板（仅在编辑时显示） -->
+      <!-- 分段练习设置面板（原生控件） -->
       <div v-if="isEditing" class="segment-settings">
         <h4>分段练习设置</h4>
         <div class="setting-row">
           <span class="setting-label">开启分段练习</span>
-          <ElSwitch v-model="enableSegment" />
+          <label class="switch">
+            <input type="checkbox" v-model="enableSegment">
+            <span class="slider"></span>
+          </label>
         </div>
         <template v-if="enableSegment">
           <div class="setting-row">
             <span class="setting-label">每段字数</span>
-            <ElInputNumber v-model="segmentSize" :min="10" :max="1000" size="small" />
+            <input type="number" v-model.number="segmentSize" min="10" max="1000" class="native-input" />
           </div>
           <div class="setting-row">
             <span class="setting-label">速度下限（字/分）</span>
-            <ElInputNumber v-model="thresholdSpeed" :min="0" :max="500" size="small" />
+            <input type="number" v-model.number="thresholdSpeed" min="0" max="500" class="native-input" />
           </div>
           <div class="setting-row">
             <span class="setting-label">准确率下限（%）</span>
-            <ElInputNumber v-model="thresholdAccuracy" :min="0" :max="100" size="small" />
+            <input type="number" v-model.number="thresholdAccuracy" min="0" max="100" class="native-input" />
           </div>
           <div class="setting-row">
             <span class="setting-label">平均击键上限（次/字）</span>
-            <ElInputNumber v-model="thresholdPress" :min="0" :max="10" :step="0.1" size="small" />
+            <input type="number" v-model.number="thresholdPress" min="0" max="10" step="0.1" class="native-input" />
           </div>
           <div class="setting-row">
             <span class="setting-label">未达标时操作</span>
-            <ElSelect v-model="thresholdAction" size="small">
-              <ElOption label="乱序" value="shuffle" />
-              <ElOption label="重打当前段" value="retry" />
-              <ElOption label="不处理" value="none" />
-            </ElSelect>
+            <select v-model="thresholdAction" class="native-select">
+              <option value="shuffle">乱序</option>
+              <option value="retry">重打当前段</option>
+              <option value="none">不处理</option>
+            </select>
           </div>
           <div class="setting-note">
             * 当任何一项指标未达标时触发所选操作。
@@ -506,7 +478,6 @@ watch(index, () => {
             </span>
           </p>
         </div>
-        <!-- 显示当前分段进度（仅当分段练习开启时） -->
         <div v-if="enableSegment" class="segment-progress">
           第 {{ currentSegmentIndex + 1 }} / {{ totalSegments }} 段
         </div>
@@ -549,18 +520,74 @@ watch(index, () => {
 @import "../styles/color.less";
 @import "../styles/var.less";
 
-// 确保 Element Plus 开关可点击
-.segment-settings {
-  .el-switch {
-    pointer-events: auto;
-    opacity: 1;
-  }
+/* 原生开关样式 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+  background-color: #ccc;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 20px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: @primary-color;
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* 原生输入框样式 */
+.native-input, .native-select {
+  width: 140px;
+  padding: 4px 8px;
+  border: 1px solid var(--gray-010);
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: var(--white);
+  color: var(--black);
+}
+
+.native-input:focus, .native-select:focus {
+  outline: none;
+  border-color: @primary-color;
 }
 
 .p-mode {
   .display-area {
     padding: 0 64px 32px 32px;
-
     display: flex;
     align-items: center;
     justify-content: center;
@@ -572,7 +599,6 @@ watch(index, () => {
 
     &.editing {
       align-items: flex-start;
-
       @media (max-width: 576px) {
         align-items: center;
       }
@@ -605,7 +631,6 @@ watch(index, () => {
           font-size: 20px;
           margin-right: 16px;
           font-weight: bold;
-
           @border: 1px solid var(--black);
           border-top: @border;
           border-bottom: @border;
@@ -622,7 +647,6 @@ watch(index, () => {
         .title {
           max-width: 160px;
           text-align: right;
-
           @media (max-width: 576px) {
             max-width: 100vw;
           }
@@ -638,7 +662,6 @@ watch(index, () => {
     .p-title:hover,
     .p-title.editing {
       flex-direction: column;
-
       @media (max-width: 576px) {
         align-items: center;
       }
@@ -678,7 +701,6 @@ watch(index, () => {
       }
     }
 
-    // 分段设置面板样式
     .segment-settings {
       background-color: var(--white);
       border: 1px solid var(--gray-010);
@@ -703,9 +725,8 @@ watch(index, () => {
           flex-shrink: 0;
         }
 
-        .el-input-number,
-        .el-select {
-          width: 140px;
+        .switch, .native-input, .native-select {
+          margin-left: 8px;
         }
       }
 
@@ -850,7 +871,6 @@ watch(index, () => {
     position: absolute;
     right: var(--app-padding);
     bottom: var(--app-padding);
-
     @media (max-width: 576px) {
       top: 36px;
     }
