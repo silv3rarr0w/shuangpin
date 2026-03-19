@@ -3,6 +3,9 @@ import Pinyin from "../components/Pinyin.vue";
 import Keyboard from "../components/Keyboard.vue";
 import TypeSummary from "../components/TypeSummary.vue";
 
+// 显式导入 Element Plus 组件
+import { ElSwitch, ElInputNumber, ElSelect, ElOption } from 'element-plus';
+
 import {
   ref,
   watchPostEffect,
@@ -10,7 +13,7 @@ import {
   onDeactivated,
   watchEffect,
   computed,
-  watch, // 新增导入
+  watch,
 } from "vue";
 import { useStore } from "../store";
 import { storeToRefs } from "pinia";
@@ -447,37 +450,37 @@ watch(index, () => {
         </div>
       </div>
 
-      <!-- 新增：分段练习设置面板（仅在编辑时显示） -->
+      <!-- 分段练习设置面板（仅在编辑时显示） -->
       <div v-if="isEditing" class="segment-settings">
         <h4>分段练习设置</h4>
         <div class="setting-row">
           <span class="setting-label">开启分段练习</span>
-          <el-switch v-model="enableSegment" />
+          <ElSwitch v-model="enableSegment" />
         </div>
         <template v-if="enableSegment">
           <div class="setting-row">
             <span class="setting-label">每段字数</span>
-            <el-input-number v-model="segmentSize" :min="10" :max="1000" size="small" />
+            <ElInputNumber v-model="segmentSize" :min="10" :max="1000" size="small" />
           </div>
           <div class="setting-row">
             <span class="setting-label">速度下限（字/分）</span>
-            <el-input-number v-model="thresholdSpeed" :min="0" :max="500" size="small" />
+            <ElInputNumber v-model="thresholdSpeed" :min="0" :max="500" size="small" />
           </div>
           <div class="setting-row">
             <span class="setting-label">准确率下限（%）</span>
-            <el-input-number v-model="thresholdAccuracy" :min="0" :max="100" size="small" />
+            <ElInputNumber v-model="thresholdAccuracy" :min="0" :max="100" size="small" />
           </div>
           <div class="setting-row">
             <span class="setting-label">平均击键上限（次/字）</span>
-            <el-input-number v-model="thresholdPress" :min="0" :max="10" :step="0.1" size="small" />
+            <ElInputNumber v-model="thresholdPress" :min="0" :max="10" :step="0.1" size="small" />
           </div>
           <div class="setting-row">
             <span class="setting-label">未达标时操作</span>
-            <el-select v-model="thresholdAction" size="small">
-              <el-option label="乱序" value="shuffle" />
-              <el-option label="重打当前段" value="retry" />
-              <el-option label="不处理" value="none" />
-            </el-select>
+            <ElSelect v-model="thresholdAction" size="small">
+              <ElOption label="乱序" value="shuffle" />
+              <ElOption label="重打当前段" value="retry" />
+              <ElOption label="不处理" value="none" />
+            </ElSelect>
           </div>
           <div class="setting-note">
             * 当任何一项指标未达标时触发所选操作。
@@ -503,7 +506,7 @@ watch(index, () => {
             </span>
           </p>
         </div>
-        <!-- 新增：显示当前分段进度（仅当分段练习开启时） -->
+        <!-- 显示当前分段进度（仅当分段练习开启时） -->
         <div v-if="enableSegment" class="segment-progress">
           第 {{ currentSegmentIndex + 1 }} / {{ totalSegments }} 段
         </div>
@@ -545,6 +548,14 @@ watch(index, () => {
 <style lang="less" scoped>
 @import "../styles/color.less";
 @import "../styles/var.less";
+
+// 确保 Element Plus 开关可点击
+.segment-settings {
+  .el-switch {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
 
 .p-mode {
   .display-area {
@@ -667,7 +678,7 @@ watch(index, () => {
       }
     }
 
-    // 新增：分段设置面板样式
+    // 分段设置面板样式
     .segment-settings {
       background-color: var(--white);
       border: 1px solid var(--gray-010);
