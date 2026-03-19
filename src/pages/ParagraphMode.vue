@@ -50,11 +50,13 @@ onMounted(() => {
       console.error('Failed to load criteria config', e);
     }
   }
+  console.log('Loaded criteria:', criteria.value);
 });
 
 // 保存配置
 watch(criteria, (val) => {
   localStorage.setItem('paragraph-criteria', JSON.stringify(val));
+  console.log('Criteria saved:', val);
 }, { deep: true });
 
 // ---------- Store 和状态 ----------
@@ -137,6 +139,7 @@ function splitIntoParagraphs(fullText: string): string[] {
   for (let i = 0; i < fullText.length; i += size) {
     result.push(fullText.slice(i, i + size));
   }
+  console.log(`Split into ${result.length} paragraphs, size=${size}`);
   return result;
 }
 
@@ -148,13 +151,16 @@ function resetParagraphs(fullText: string) {
   // 重置段内进度
   const info = loadArticleText(articles.value[index.value % articles.value.length]);
   info.progress.currentIndex = 0;
+  console.log('Reset paragraphs, total paragraphs:', paragraphs.value.length);
 }
 
 // 获取当前段实际显示的文本（若乱序则用乱序版本）
 const currentParagraphText = computed(() => {
   if (paragraphs.value.length === 0) return '';
   const para = paragraphs.value[currentParagraphNo.value - 1] || '';
-  return shuffledCurrentPara.value ?? para;
+  const text = shuffledCurrentPara.value ?? para;
+  console.log('Current paragraph text:', text);
+  return text;
 });
 
 // 构建当前段显示结构（[字符, 段内偏移]）
@@ -216,6 +222,7 @@ function onAriticleChange(i: number) {
   const info = loadArticleText(articles.value[i % articles.value.length]);
   resetParagraphs(info.text);
   summary.value = new TypingSummary();
+  console.log('Article changed to:', info.name);
 }
 
 const pinyin = ref<string[]>([]);
@@ -276,18 +283,29 @@ watchPostEffect(() => {
 // 监听当前段是否完成
 watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
   const paraLength = currentParagraphText.value.length;
+  console.log(`Index changed: ${oldVal} -> ${newVal}, paraLength=${paraLength}`);
   if (paraLength > 0 && newVal >= paraLength && oldVal < paraLength) {
+    console.log('Paragraph finished!');
     handleParagraphFinish();
   }
 });
 
 function handleParagraphFinish() {
   // 防止重复调用
-  if (article.value.progress.currentIndex < currentParagraphText.value.length) return;
+  if (article.value.progress.currentIndex < currentParagraphText.value.length) {
+    console.log('handleParagraphFinish called but not finished?');
+    return;
+  }
+
+  console.log('=== Paragraph Finish ===');
+  console.log('Criteria open:', criteria.value.open);
+  console.log('Speed:', summary.value.hanziPerMinutes, 'Threshold:', criteria.value.speed);
+  console.log('Accuracy:', summary.value.totalAccuracy * 100, 'Threshold:', criteria.value.accuracy);
+  console.log('Press per Hanzi:', summary.value.pressPerHanzi, 'Threshold:', criteria.value.pressPerHanzi);
 
   // 一段打完，检查指标
   if (!criteria.value.open) {
-    // 未开启指标，直接进入下一段
+    console.log('Criteria not open, go to next paragraph');
     goToNextParagraph();
     return;
   }
@@ -301,7 +319,10 @@ function handleParagraphFinish() {
   if (criteria.value.accuracy > 0 && accuracy < criteria.value.accuracy) meet = false;
   if (criteria.value.pressPerHanzi > 0 && pressPerHanzi > criteria.value.pressPerHanzi) meet = false;
 
+  console.log('Meet criteria?', meet);
+
   if (!meet) {
+    console.log('Not meet, action:', criteria.value.action);
     // 未达标，根据动作处理
     switch (criteria.value.action) {
       case 'retry':
@@ -318,12 +339,13 @@ function handleParagraphFinish() {
         break;
     }
   } else {
-    // 达标，进入下一段
+    console.log('Meet criteria, go to next paragraph');
     goToNextParagraph();
   }
 
   // 重置统计（下一段重新累计）
   summary.value = new TypingSummary();
+  console.log('Summary reset');
 }
 
 // 进入下一段
@@ -335,6 +357,7 @@ function goToNextParagraph() {
   }
   article.value.progress.currentIndex = 0;
   shuffledCurrentPara.value = null;
+  console.log('Go to next paragraph:', currentParagraphNo.value);
 }
 
 // 乱序当前段（保持换行符位置不变）
@@ -363,6 +386,7 @@ function shuffleCurrentParagraph() {
   const shuffled = newLines.join('\n');
   shuffledCurrentPara.value = shuffled;
   article.value.progress.currentIndex = 0;
+  console.log('Shuffled current paragraph');
 }
 
 function getShortName(s: string, n = 10) {
@@ -393,11 +417,13 @@ function saveArticle() {
   editingContent.value = "";
   index.value = articles.value.length - 1;
   resetParagraphs(editingContent.value);
+  console.log('Custom article saved');
 }
 
 function deleteArticle() {
   articles.value.splice(index.value, 1);
   onAriticleChange(index.value);
+  console.log('Article deleted');
 }
 
 function shortPinyin(pinyins: string[]) {
