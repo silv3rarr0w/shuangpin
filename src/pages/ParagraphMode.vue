@@ -274,14 +274,17 @@ watchPostEffect(() => {
 });
 
 // 监听当前段是否完成
-watch(() => article.value.progress.currentIndex, (newVal) => {
+watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
   const paraLength = currentParagraphText.value.length;
-  if (paraLength > 0 && newVal >= paraLength) {
+  if (paraLength > 0 && newVal >= paraLength && oldVal < paraLength) {
     handleParagraphFinish();
   }
 });
 
 function handleParagraphFinish() {
+  // 防止重复调用
+  if (article.value.progress.currentIndex < currentParagraphText.value.length) return;
+
   // 一段打完，检查指标
   if (!criteria.value.open) {
     // 未开启指标，直接进入下一段
@@ -327,15 +330,11 @@ function handleParagraphFinish() {
 function goToNextParagraph() {
   if (currentParagraphNo.value < paragraphs.value.length) {
     currentParagraphNo.value++;
-    article.value.progress.currentIndex = 0;
-    shuffledCurrentPara.value = null; // 清除乱序状态
   } else {
-    // 所有段落打完，可循环或提示
-    // 这里简单循环到第一段
     currentParagraphNo.value = 1;
-    article.value.progress.currentIndex = 0;
-    shuffledCurrentPara.value = null;
   }
+  article.value.progress.currentIndex = 0;
+  shuffledCurrentPara.value = null;
 }
 
 // 乱序当前段（保持换行符位置不变）
