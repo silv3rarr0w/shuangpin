@@ -12,7 +12,6 @@ import {
   onDeactivated,
   onMounted,
   computed,
-  nextTick,
 } from "vue";
 import { useStore } from "../store";
 import { storeToRefs } from "pinia";
@@ -152,6 +151,8 @@ function resetParagraphs(fullText: string) {
   // 重置段内进度
   const info = loadArticleText(articles.value[index.value % articles.value.length]);
   info.progress.currentIndex = 0;
+  pinyin.value = [];
+  isValidPinyin.value = false;
   console.log('Reset paragraphs, total paragraphs:', paragraphs.value.length);
 }
 
@@ -160,7 +161,6 @@ const currentParagraphText = computed(() => {
   if (paragraphs.value.length === 0) return '';
   const para = paragraphs.value[currentParagraphNo.value - 1] || '';
   const text = shuffledCurrentPara.value ?? para;
-  console.log('Current paragraph text:', text);
   return text;
 });
 
@@ -230,6 +230,7 @@ const pinyin = ref<string[]>([]);
 const isValidPinyin = ref(false);
 
 function onSeq([lead, follow]: [string?, string?]) {
+  console.log('onSeq called with', lead, follow);
   for (const answer of article.value.answer) {
     const res = matchSpToPinyin(
       store.mode(),
@@ -329,6 +330,8 @@ function handleParagraphFinish() {
       case 'retry':
         // 重打本段：重置段内进度
         article.value.progress.currentIndex = 0;
+        pinyin.value = [];
+        isValidPinyin.value = false;
         break;
       case 'shuffle':
         // 乱序本段
@@ -358,14 +361,9 @@ function goToNextParagraph() {
   }
   article.value.progress.currentIndex = 0;
   shuffledCurrentPara.value = null;
-  // 重置输入相关状态
   pinyin.value = [];
   isValidPinyin.value = false;
   console.log('Go to next paragraph:', currentParagraphNo.value);
-  // 等待 DOM 更新后重新滚动光标
-  nextTick(() => {
-    scrollToFocus();
-  });
 }
 
 // 乱序当前段（保持换行符位置不变）
@@ -394,6 +392,8 @@ function shuffleCurrentParagraph() {
   const shuffled = newLines.join('\n');
   shuffledCurrentPara.value = shuffled;
   article.value.progress.currentIndex = 0;
+  pinyin.value = [];
+  isValidPinyin.value = false;
   console.log('Shuffled current paragraph');
 }
 
