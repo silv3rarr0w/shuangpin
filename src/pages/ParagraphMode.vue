@@ -78,7 +78,7 @@ onDeactivated(() => {
   document.removeEventListener("keypress", onKeyPressed);
 });
 
-// 初始化文章列表（补全 Progress 必需属性）
+// 初始化文章列表
 (function checkArticles() {
   const rawNames = new Set([...Object.keys(rawArticles)]);
   articles.value.forEach((v) => {
@@ -159,7 +159,6 @@ const currentParagraphText = computed(() => {
   if (paragraphs.value.length === 0) return '';
   const para = paragraphs.value[currentParagraphNo.value - 1] || '';
   const text = shuffledCurrentPara.value ?? para;
-  console.log('Current paragraph text:', text);
   return text;
 });
 
@@ -178,12 +177,12 @@ const article = computed(() => {
   }
 
   const currentParaText = currentParagraphText.value;
-  // 确保当前索引不超过段落长度
-  if (info.progress.currentIndex >= currentParaText.length) {
-    info.progress.currentIndex = 0;
+  let currentIdx = info.progress.currentIndex;
+  // 如果索引超出段落长度，临时设为最后一个字符（等待完成处理）
+  if (currentIdx >= currentParaText.length) {
+    currentIdx = currentParaText.length - 1;
   }
-
-  const currentChar = currentParaText[info.progress.currentIndex] ?? "";
+  const currentChar = currentParaText[currentIdx] ?? "";
   const pinyin = getPinyinOf(currentChar);
 
   return {
@@ -268,30 +267,32 @@ function scrollToFocus() {
 
 onActivated(() => scrollToFocus());
 
+// 主要逻辑：每次有效输入后增加索引，并检查段落是否完成
 watchPostEffect(() => {
   scrollToFocus();
 
   if (isValidPinyin.value) {
     setTimeout(() => {
       pinyin.value = [];
+      // 增加索引前先保存旧值用于日志
+      const oldIdx = article.value.progress.currentIndex;
       article.value.progress.currentIndex += 1;
+      const newIdx = article.value.progress.currentIndex;
+      console.log(`Index increased: ${oldIdx} -> ${newIdx}`);
       isValidPinyin.value = false;
+
+      // 检查是否完成段落
+      const paraLength = currentParagraphText.value.length;
+      if (newIdx >= paraLength) {
+        console.log('Paragraph finished!');
+        handleParagraphFinish();
+      }
     }, 30);
   }
 });
 
-// 监听当前段是否完成
-watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
-  const paraLength = currentParagraphText.value.length;
-  console.log(`Index changed: ${oldVal} -> ${newVal}, paraLength=${paraLength}`);
-  if (paraLength > 0 && newVal >= paraLength && oldVal < paraLength) {
-    console.log('Paragraph finished!');
-    handleParagraphFinish();
-  }
-});
-
 function handleParagraphFinish() {
-  // 防止重复调用
+  // 防止重复调用（可能由于多次触发）
   if (article.value.progress.currentIndex < currentParagraphText.value.length) {
     console.log('handleParagraphFinish called but not finished?');
     return;
