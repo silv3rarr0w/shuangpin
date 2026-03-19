@@ -140,17 +140,18 @@ const validInput = computed(() => {
   return editingTitle.value.length > 0 && editingContent.value.length > 0;
 });
 
-// ========== 新增：分段练习设置（使用原生元素）==========
-const enableSegment = ref(false);               // 是否开启分段练习
-const segmentSize = ref(50);                    // 每段字数（默认50）
-const thresholdSpeed = ref(100);                 // 速度下限（字/分）
-const thresholdAccuracy = ref(95);               // 准确率下限（%）
-const thresholdPress = ref(2.5);                 // 平均击键上限（次/字）
-const thresholdAction = ref<"shuffle" | "retry" | "none">("shuffle"); // 未达标操作
+// ========== 分段练习设置（使用原生元素）==========
+// 默认值修改：每段字数=10，速度下限=50，准确率下限=100，击键上限=3，未达标操作=乱序
+const enableSegment = ref(false);
+const segmentSize = ref(10);
+const thresholdSpeed = ref(50);
+const thresholdAccuracy = ref(100);
+const thresholdPress = ref(3);
+const thresholdAction = ref<"shuffle" | "retry" | "none">("shuffle");
 
-const fullText = ref("");                         // 原始文章全文
-const segments = ref<Array<{ start: number; end: number }>>([]); // 分段起止索引
-const currentSegmentIndex = ref(0);                // 当前段索引
+const fullText = ref("");
+const segments = ref<Array<{ start: number; end: number }>>([]);
+const currentSegmentIndex = ref(0);
 const segmentStartStats = ref({
   totalChars: 0,
   totalKeys: 0,
@@ -248,7 +249,7 @@ function shuffleArray<T>(arr: T[]) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
-// ========== 新增结束 ==========
+// ========== 结束 ==========
 
 function onAriticleChange(i: number) {
   index.value = i;
@@ -419,47 +420,6 @@ watch(index, () => {
         </div>
       </div>
 
-      <!-- 分段练习设置面板（原生控件） -->
-      <div v-if="isEditing" class="segment-settings">
-        <h4>分段练习设置</h4>
-        <div class="setting-row">
-          <span class="setting-label">开启分段练习</span>
-          <label class="switch">
-            <input type="checkbox" v-model="enableSegment">
-            <span class="slider"></span>
-          </label>
-        </div>
-        <template v-if="enableSegment">
-          <div class="setting-row">
-            <span class="setting-label">每段字数</span>
-            <input type="number" v-model.number="segmentSize" min="10" max="1000" class="native-input" />
-          </div>
-          <div class="setting-row">
-            <span class="setting-label">速度下限（字/分）</span>
-            <input type="number" v-model.number="thresholdSpeed" min="0" max="500" class="native-input" />
-          </div>
-          <div class="setting-row">
-            <span class="setting-label">准确率下限（%）</span>
-            <input type="number" v-model.number="thresholdAccuracy" min="0" max="100" class="native-input" />
-          </div>
-          <div class="setting-row">
-            <span class="setting-label">平均击键上限（次/字）</span>
-            <input type="number" v-model.number="thresholdPress" min="0" max="10" step="0.1" class="native-input" />
-          </div>
-          <div class="setting-row">
-            <span class="setting-label">未达标时操作</span>
-            <select v-model="thresholdAction" class="native-select">
-              <option value="shuffle">乱序</option>
-              <option value="retry">重打当前段</option>
-              <option value="none">不处理</option>
-            </select>
-          </div>
-          <div class="setting-note">
-            * 当任何一项指标未达标时触发所选操作。
-          </div>
-        </template>
-      </div>
-
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
           <p
@@ -482,6 +442,8 @@ watch(index, () => {
           第 {{ currentSegmentIndex + 1 }} / {{ totalSegments }} 段
         </div>
       </div>
+
+      <!-- 编辑模式：输入框 + 设置面板（在下方） -->
       <div v-else class="editing-text-area">
         <div class="editing-bar">
           <input
@@ -502,6 +464,47 @@ watch(index, () => {
           class="editing-text"
           placeholder="键入范文……"
         />
+
+        <!-- 设置面板移到输入框下方 -->
+        <div class="segment-settings" v-if="isEditing">
+          <h4>分段练习设置</h4>
+          <div class="setting-row">
+            <span class="setting-label">开启分段练习</span>
+            <label class="switch">
+              <input type="checkbox" v-model="enableSegment" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <template v-if="enableSegment">
+            <div class="setting-row">
+              <span class="setting-label">每段字数</span>
+              <input type="number" v-model.number="segmentSize" min="10" max="1000" class="native-input" />
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">速度下限（字/分）</span>
+              <input type="number" v-model.number="thresholdSpeed" min="0" max="500" class="native-input" />
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">准确率下限（%）</span>
+              <input type="number" v-model.number="thresholdAccuracy" min="0" max="100" class="native-input" />
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">击键上限（次/字）</span>
+              <input type="number" v-model.number="thresholdPress" min="0" max="10" step="0.1" class="native-input" />
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">未达标时操作</span>
+              <select v-model="thresholdAction" class="native-select">
+                <option value="shuffle">乱序</option>
+                <option value="retry">重打当前段</option>
+                <option value="none">不处理</option>
+              </select>
+            </div>
+            <div class="setting-note">
+              * 当任何一项指标未达标时触发所选操作。
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -545,7 +548,7 @@ watch(index, () => {
   right: 0;
   bottom: 0;
   background-color: #ccc;
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 20px;
 }
 
@@ -557,7 +560,7 @@ watch(index, () => {
   left: 2px;
   bottom: 2px;
   background-color: white;
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 50%;
 }
 
@@ -570,7 +573,8 @@ input:checked + .slider:before {
 }
 
 /* 原生输入框样式 */
-.native-input, .native-select {
+.native-input,
+.native-select {
   width: 140px;
   padding: 4px 8px;
   border: 1px solid var(--gray-010);
@@ -580,7 +584,8 @@ input:checked + .slider:before {
   color: var(--black);
 }
 
-.native-input:focus, .native-select:focus {
+.native-input:focus,
+.native-select:focus {
   outline: none;
   border-color: @primary-color;
 }
@@ -698,42 +703,6 @@ input:checked + .slider:before {
             opacity: 1;
           }
         }
-      }
-    }
-
-    .segment-settings {
-      background-color: var(--white);
-      border: 1px solid var(--gray-010);
-      padding: 16px;
-      margin-left: 20px;
-      border-radius: 4px;
-      font-size: 14px;
-
-      h4 {
-        margin: 0 0 12px 0;
-        font-size: 16px;
-        font-weight: bold;
-      }
-
-      .setting-row {
-        display: flex;
-        align-items: center;
-        margin-bottom: 12px;
-
-        .setting-label {
-          width: 120px;
-          flex-shrink: 0;
-        }
-
-        .switch, .native-input, .native-select {
-          margin-left: 8px;
-        }
-      }
-
-      .setting-note {
-        color: var(--gray-6);
-        font-size: 12px;
-        margin-top: 8px;
       }
     }
 
@@ -862,6 +831,45 @@ input:checked + .slider:before {
 
         @media (max-width: 576px) {
           height: calc(var(--page-height) - 300px);
+        }
+      }
+
+      /* 设置面板在输入框下方 */
+      .segment-settings {
+        background-color: var(--white);
+        border: 1px solid var(--gray-010);
+        padding: 16px;
+        margin-top: 20px;
+        border-radius: 4px;
+        font-size: 14px;
+
+        h4 {
+          margin: 0 0 12px 0;
+          font-size: 16px;
+          font-weight: bold;
+        }
+
+        .setting-row {
+          display: flex;
+          align-items: center;
+          margin-bottom: 12px;
+
+          .setting-label {
+            width: 120px;
+            flex-shrink: 0;
+          }
+
+          .switch,
+          .native-input,
+          .native-select {
+            margin-left: 8px;
+          }
+        }
+
+        .setting-note {
+          color: var(--gray-6);
+          font-size: 12px;
+          margin-top: 8px;
         }
       }
     }
