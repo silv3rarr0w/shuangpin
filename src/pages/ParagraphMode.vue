@@ -178,11 +178,7 @@ const article = computed(() => {
   }
 
   const currentParaText = currentParagraphText.value;
-  // 确保当前索引不超过段落长度
-  if (info.progress.currentIndex >= currentParaText.length) {
-    info.progress.currentIndex = 0;
-  }
-
+  // 不再自动重置索引，让索引可以超过长度以便触发完成检测
   const currentChar = currentParaText[info.progress.currentIndex] ?? "";
   const pinyin = getPinyinOf(currentChar);
 
