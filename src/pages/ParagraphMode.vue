@@ -10,6 +10,7 @@ import {
   onDeactivated,
   watchEffect,
   computed,
+  watch, // 新增导入
 } from "vue";
 import { useStore } from "../store";
 import { storeToRefs } from "pinia";
@@ -193,9 +194,9 @@ function initSegmentsIfEnabled() {
 // 记录当前段起始时的统计快照
 function recordSegmentStart() {
   segmentStartStats.value = {
-    totalChars: summary.value.totalChars || 0,
-    totalKeys: summary.value.totalKeys || 0,
-    totalErrors: summary.value.totalErrors || 0,
+    totalChars: summary.value.totalValidMatches || 0,   // 已输入字数
+    totalKeys: summary.value.totalPressCount || 0,      // 总按键数
+    totalErrors: (summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0), // 错误次数
     time: Date.now(),
   };
 }
@@ -204,9 +205,9 @@ function recordSegmentStart() {
 function checkSegment达标() {
   const now = Date.now();
   const timeDelta = (now - segmentStartStats.value.time) / 1000 / 60; // 分钟
-  const charsDelta = (summary.value.totalChars || 0) - segmentStartStats.value.totalChars;
-  const keysDelta = (summary.value.totalKeys || 0) - segmentStartStats.value.totalKeys;
-  const errorsDelta = (summary.value.totalErrors || 0) - segmentStartStats.value.totalErrors;
+  const charsDelta = (summary.value.totalValidMatches || 0) - segmentStartStats.value.totalChars;
+  const keysDelta = (summary.value.totalPressCount || 0) - segmentStartStats.value.totalKeys;
+  const errorsDelta = ((summary.value.totalValidMatches || 0) - (summary.value.totalCorrectMatches || 0)) - segmentStartStats.value.totalErrors;
 
   if (charsDelta === 0) return true; // 未打任何字，视为达标（避免除零）
 
