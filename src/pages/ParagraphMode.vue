@@ -730,24 +730,6 @@ function shortPinyin(pinyins: string[]) {
         max-width: calc(100vw - var(--app-padding) * 2);
       }
 
-      &:before {
-        content: "";
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        left: 0;
-        top: 0;
-        background: linear-gradient(
-          0deg,
-          var(--white) 0%,
-          transparent 30%,
-          transparent 70%,
-          var(--white) 100%
-        );
-        pointer-events: none;
-        z-index: 999;
-      }
-
       .scroll-area {
         overflow-y: scroll;
         height: 240px; // 增加高度，拉长打字区域
@@ -759,11 +741,11 @@ function shortPinyin(pinyins: string[]) {
         }
 
         .bg-text {
-          opacity: 0.4;
+          opacity: 1;
         }
 
         .done-text {
-          opacity: 1;
+          opacity: 0.2;
         }
 
         .current-text {
