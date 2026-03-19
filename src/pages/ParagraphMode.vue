@@ -454,48 +454,7 @@ function shortPinyin(pinyins: string[]) {
 
 <template>
   <div class="p-mode">
-    <!-- 指标与分段设置栏 -->
-    <div class="criteria-bar" v-if="!isEditing">
-      <div class="criteria-item">
-        <span class="criteria-label">指标</span>
-        <label class="switch">
-          <input type="checkbox" v-model="criteria.open" />
-          <span class="slider"></span>
-        </label>
-      </div>
-      <template v-if="criteria.open">
-        <div class="criteria-item">
-          <span class="criteria-label">速度≥</span>
-          <input type="number" v-model.number="criteria.speed" min="0" step="10" class="criteria-input" />
-        </div>
-        <div class="criteria-item">
-          <span class="criteria-label">键准≥</span>
-          <input type="number" v-model.number="criteria.accuracy" min="0" max="100" step="1" class="criteria-input" />
-        </div>
-        <div class="criteria-item">
-          <span class="criteria-label">每字击键≤</span>
-          <input type="number" v-model.number="criteria.pressPerHanzi" min="0" step="0.1" class="criteria-input" />
-        </div>
-        <div class="criteria-item">
-          <span class="criteria-label">未达标时</span>
-          <select v-model="criteria.action" class="criteria-select">
-            <option value="noop">不处理</option>
-            <option value="retry">重打</option>
-            <option value="shuffle">乱序</option>
-          </select>
-        </div>
-      </template>
-      <!-- 分段设置：每段字数 -->
-      <div class="criteria-item">
-        <span class="criteria-label">每段字数</span>
-        <input type="number" v-model.number="criteria.paragraphSize" min="1" step="1" class="criteria-input" @change="resetParagraphs(article.originalFullText)" />
-      </div>
-      <div class="criteria-item">
-        <span class="criteria-label">段 {{ currentParagraphNo }}/{{ paragraphs.length }}</span>
-      </div>
-    </div>
-
-    <!-- 显示区域：只显示当前段 -->
+    <!-- 顶部区域保持不变：文章标题和菜单 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
         <div class="pinyin">
@@ -533,7 +492,7 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
-      <!-- 当前段文字显示 -->
+      <!-- 当前段文字显示区域（高度已增加） -->
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
           <p>
@@ -574,8 +533,56 @@ function shortPinyin(pinyins: string[]) {
       </div>
     </div>
 
-    <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" />
+    <!-- 底部控制区：虚拟键盘 + 指标栏（置于键盘上方） -->
+    <div class="bottom-area">
+      <!-- 指标栏 -->
+      <div class="criteria-bar" v-if="!isEditing">
+        <div class="criteria-item">
+          <span class="criteria-label">指标</span>
+          <label class="switch">
+            <input type="checkbox" v-model="criteria.open" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <template v-if="criteria.open">
+          <div class="criteria-item">
+            <span class="criteria-label">速度≥</span>
+            <input type="number" v-model.number="criteria.speed" min="0" step="10" class="criteria-input" />
+          </div>
+          <div class="criteria-item">
+            <span class="criteria-label">键准≥</span>
+            <input type="number" v-model.number="criteria.accuracy" min="0" max="100" step="1" class="criteria-input" />
+          </div>
+          <div class="criteria-item">
+            <span class="criteria-label">每字击键≤</span>
+            <input type="number" v-model.number="criteria.pressPerHanzi" min="0" step="0.1" class="criteria-input" />
+          </div>
+          <div class="criteria-item">
+            <span class="criteria-label">未达标时</span>
+            <select v-model="criteria.action" class="criteria-select">
+              <option value="noop">不处理</option>
+              <option value="retry">重打</option>
+              <option value="shuffle">乱序</option>
+            </select>
+          </div>
+        </template>
+        <!-- 分段设置：仅在指标开启时显示 -->
+        <template v-if="criteria.open">
+          <div class="criteria-item">
+            <span class="criteria-label">每段字数</span>
+            <input type="number" v-model.number="criteria.paragraphSize" min="1" step="1" class="criteria-input" @change="resetParagraphs(article.originalFullText)" />
+          </div>
+          <div class="criteria-item">
+            <span class="criteria-label">段 {{ currentParagraphNo }}/{{ paragraphs.length }}</span>
+          </div>
+        </template>
+      </div>
 
+      <!-- 虚拟键盘（缩小版） -->
+      <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" class="small-keyboard" />
+    </div>
+
+    <!-- 统计摘要（仍固定在右下角） -->
     <div v-if="!isEditing" class="summary">
       <TypeSummary
         :speed="summary.hanziPerMinutes"
@@ -591,103 +598,12 @@ function shortPinyin(pinyins: string[]) {
 @import "../styles/var.less";
 
 .p-mode {
-  .criteria-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.5rem 1rem;
-    background: var(--gray-f8);
-    border-bottom: 1px solid var(--gray-e0);
-    font-size: 14px;
-
-    @media (max-width: 576px) {
-      padding: 0.5rem;
-      gap: 0.5rem;
-    }
-
-    .criteria-item {
-      display: flex;
-      align-items: center;
-      gap: 0.3rem;
-
-      .criteria-label {
-        white-space: nowrap;
-        color: var(--black);
-      }
-
-      .criteria-input {
-        width: 70px;
-        padding: 4px;
-        border: 1px solid var(--gray-c);
-        border-radius: 4px;
-        background: var(--white);
-        color: var(--black);
-        font-size: 14px;
-
-        @media (max-width: 576px) {
-          width: 60px;
-        }
-      }
-
-      .criteria-select {
-        padding: 4px;
-        border: 1px solid var(--gray-c);
-        border-radius: 4px;
-        background: var(--white);
-        color: var(--black);
-        font-size: 14px;
-      }
-
-      .switch {
-        position: relative;
-        display: inline-block;
-        width: 40px;
-        height: 20px;
-        margin-left: 4px;
-
-        input {
-          opacity: 0;
-          width: 0;
-          height: 0;
-        }
-
-        .slider {
-          position: absolute;
-          cursor: pointer;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-color: var(--gray-c);
-          transition: 0.3s;
-          border-radius: 20px;
-
-          &:before {
-            position: absolute;
-            content: "";
-            height: 16px;
-            width: 16px;
-            left: 2px;
-            bottom: 2px;
-            background-color: white;
-            transition: 0.3s;
-            border-radius: 50%;
-          }
-        }
-
-        input:checked + .slider {
-          background-color: @primary-color;
-        }
-
-        input:checked + .slider:before {
-          transform: translateX(20px);
-        }
-      }
-    }
-  }
+  display: flex;
+  flex-direction: column;
+  height: 100vh; // 使用视口高度，让底部区域固定
 
   .display-area {
+    flex: 1; // 占据剩余空间
     padding: 0 64px 32px 32px;
     display: flex;
     align-items: center;
@@ -833,7 +749,7 @@ function shortPinyin(pinyins: string[]) {
 
       .scroll-area {
         overflow-y: scroll;
-        height: 144px;
+        height: 240px; // 增加高度，拉长打字区域
         position: relative;
         margin: 8px 0;
 
@@ -919,13 +835,123 @@ function shortPinyin(pinyins: string[]) {
     }
   }
 
+  // 底部区域（指标栏 + 键盘）
+  .bottom-area {
+    flex-shrink: 0; // 防止被压缩
+    background: var(--gray-f8);
+    border-top: 1px solid var(--gray-e0);
+    padding: 8px 16px;
+
+    .criteria-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      font-size: 14px;
+      margin-bottom: 8px; // 与键盘留出间距
+
+      @media (max-width: 576px) {
+        gap: 0.5rem;
+      }
+
+      .criteria-item {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+
+        .criteria-label {
+          white-space: nowrap;
+          color: var(--black);
+        }
+
+        .criteria-input {
+          width: 70px;
+          padding: 4px;
+          border: 1px solid var(--gray-c);
+          border-radius: 4px;
+          background: var(--white);
+          color: var(--black);
+          font-size: 14px;
+
+          @media (max-width: 576px) {
+            width: 60px;
+          }
+        }
+
+        .criteria-select {
+          padding: 4px;
+          border: 1px solid var(--gray-c);
+          border-radius: 4px;
+          background: var(--white);
+          color: var(--black);
+          font-size: 14px;
+        }
+
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 40px;
+          height: 20px;
+          margin-left: 4px;
+
+          input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+          }
+
+          .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--gray-c);
+            transition: 0.3s;
+            border-radius: 20px;
+
+            &:before {
+              position: absolute;
+              content: "";
+              height: 16px;
+              width: 16px;
+              left: 2px;
+              bottom: 2px;
+              background-color: white;
+              transition: 0.3s;
+              border-radius: 50%;
+            }
+          }
+
+          input:checked + .slider {
+            background-color: @primary-color;
+          }
+
+          input:checked + .slider:before {
+            transform: translateX(20px);
+          }
+        }
+      }
+    }
+
+    // 缩小虚拟键盘
+    .small-keyboard {
+      transform: scale(0.8);
+      transform-origin: bottom center;
+      margin-bottom: -10px; // 补偿缩放造成的空白
+    }
+  }
+
   .summary {
     position: absolute;
     right: var(--app-padding);
-    bottom: var(--app-padding);
+    bottom: 120px; // 调整位置，避免被底部区域遮挡
+    z-index: 10;
 
     @media (max-width: 576px) {
       top: 36px;
+      bottom: auto;
     }
   }
 }
