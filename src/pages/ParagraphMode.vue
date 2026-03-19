@@ -142,6 +142,136 @@ const validInput = computed(() => {
   return editingTitle.value.length > 0 && editingContent.value.length > 0;
 });
 
+// ========== 新增：分段练习设置 ==========
+const enableSegment = ref(false);               // 是否开启分段练习
+const segmentSize = ref(50);                    // 每段字数（默认50）
+const thresholdSpeed = ref(100);                 // 速度下限（字/分）
+const thresholdAccuracy = ref(95);               // 准确率下限（%）
+const thresholdPress = ref(2.5);                 // 平均击键上限（次/字）
+const thresholdAction = ref<"shuffle" | "retry" | "none">("shuffle"); // 未达标操作
+
+// 分段相关状态（仅在练习时使用）
+const fullText = ref("");                         // 原始文章全文
+const segments = ref<Array<{ start: number; end: number }>>([]); // 分段起止索引
+const currentSegmentIndex = ref(0);                // 当前段索引
+const segmentStartStats = ref({                     // 段开始时记录的统计快照
+  totalChars: 0,
+  totalKeys: 0,
+  totalErrors: 0,
+  time: 0,
+});
+
+// 计算总段数
+const totalSegments = computed(() => segments.value.length);
+
+// 根据全文和每段字数生成分段
+function buildSegments(text: string, size: number) {
+  const segs = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + size, text.length);
+    segs.push({ start, end });
+    start = end;
+  }
+  return segs;
+}
+
+// 在开始练习时初始化分段（如果开启）
+function initSegmentsIfEnabled() {
+  if (!enableSegment.value) return;
+  // 从当前文章获取全文
+  const info = loadArticleText(articles.value[index.value]);
+  fullText.value = info.text;
+  segments.value = buildSegments(fullText.value, segmentSize.value);
+  currentSegmentIndex.value = 0;
+  // 重置进度索引到当前段起点
+  article.value.progress.currentIndex = segments.value[0].start;
+  // 记录段起始统计
+  recordSegmentStart();
+}
+
+// 记录当前段起始时的统计快照
+function recordSegmentStart() {
+  segmentStartStats.value = {
+    totalChars: summary.value.totalChars || 0,
+    totalKeys: summary.value.totalKeys || 0,
+    totalErrors: summary.value.totalErrors || 0,
+    time: Date.now(),
+  };
+}
+
+// 检查当前段是否达标，返回是否达标
+function checkSegment达标() {
+  const now = Date.now();
+  const timeDelta = (now - segmentStartStats.value.time) / 1000 / 60; // 分钟
+  const charsDelta = (summary.value.totalChars || 0) - segmentStartStats.value.totalChars;
+  const keysDelta = (summary.value.totalKeys || 0) - segmentStartStats.value.totalKeys;
+  const errorsDelta = (summary.value.totalErrors || 0) - segmentStartStats.value.totalErrors;
+
+  if (charsDelta === 0) return true; // 未打任何字，视为达标（避免除零）
+
+  const speed = charsDelta / timeDelta;                 // 字/分
+  const accuracy = (charsDelta - errorsDelta) / charsDelta; // 准确率
+  const pressPerChar = keysDelta / charsDelta;          // 平均击键
+
+  const speedOK = speed >= thresholdSpeed.value;
+  const accOK = accuracy * 100 >= thresholdAccuracy.value;
+  const pressOK = pressPerChar <= thresholdPress.value;
+
+  return speedOK && accOK && pressOK;
+}
+
+// 处理段结束：根据阈值执行操作
+function handleSegmentEnd() {
+  const is达标 = checkSegment达标();
+  if (!is达标) {
+    switch (thresholdAction.value) {
+      case "shuffle":
+        // 乱序剩余段落（不包括当前已完成段）
+        const remainingSegments = segments.value.slice(currentSegmentIndex.value + 1);
+        shuffleArray(remainingSegments);
+        segments.value = [
+          ...segments.value.slice(0, currentSegmentIndex.value + 1),
+          ...remainingSegments,
+        ];
+        // 继续进入下一段
+        moveToNextSegment();
+        break;
+      case "retry":
+        // 重打当前段：重置索引到当前段起点
+        article.value.progress.currentIndex = segments.value[currentSegmentIndex.value].start;
+        // 清空输入缓存（pinyin 重置由外部处理）
+        break;
+      case "none":
+      default:
+        moveToNextSegment();
+        break;
+    }
+  } else {
+    moveToNextSegment();
+  }
+}
+
+// 进入下一段
+function moveToNextSegment() {
+  if (currentSegmentIndex.value + 1 < segments.value.length) {
+    currentSegmentIndex.value++;
+    article.value.progress.currentIndex = segments.value[currentSegmentIndex.value].start;
+    recordSegmentStart();
+  } else {
+    // 所有段落完成，可触发结束（现有逻辑会处理）
+  }
+}
+
+// 工具：打乱数组
+function shuffleArray<T>(arr: T[]) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+// ========== 新增结束 ==========
+
 function onAriticleChange(i: number) {
   index.value = i;
   isEditing.value = i >= articles.value.length;
@@ -196,8 +326,18 @@ watchPostEffect(() => {
   if (isValidPinyin.value) {
     setTimeout(() => {
       pinyin.value = [];
-      article.value.progress.currentIndex += 1;
+      const nextIndex = article.value.progress.currentIndex + 1;
+      article.value.progress.currentIndex = nextIndex;
       isValidPinyin.value = false;
+
+      // 新增：如果开启了分段练习，检查是否到达段尾
+      if (enableSegment.value && segments.value.length > 0) {
+        const currentSegment = segments.value[currentSegmentIndex.value];
+        if (nextIndex >= currentSegment.end) {
+          // 当前段结束
+          handleSegmentEnd();
+        }
+      }
     }, 30);
   }
 });
@@ -254,6 +394,16 @@ function shortPinyin(pinyins: string[]) {
   }
   return ret.join("/");
 }
+
+// 当文章切换或开始练习时，如果开启分段则初始化分段
+watch(index, () => {
+  if (!isEditing.value && enableSegment.value) {
+    // 延迟等待 article 计算完成
+    setTimeout(() => {
+      initSegmentsIfEnabled();
+    }, 0);
+  }
+});
 </script>
 
 <template>
@@ -295,6 +445,45 @@ function shortPinyin(pinyins: string[]) {
           </div>
         </div>
       </div>
+
+      <!-- 新增：分段练习设置面板（仅在编辑时显示） -->
+      <div v-if="isEditing" class="segment-settings">
+        <h4>分段练习设置</h4>
+        <div class="setting-row">
+          <span class="setting-label">开启分段练习</span>
+          <el-switch v-model="enableSegment" />
+        </div>
+        <template v-if="enableSegment">
+          <div class="setting-row">
+            <span class="setting-label">每段字数</span>
+            <el-input-number v-model="segmentSize" :min="10" :max="1000" size="small" />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">速度下限（字/分）</span>
+            <el-input-number v-model="thresholdSpeed" :min="0" :max="500" size="small" />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">准确率下限（%）</span>
+            <el-input-number v-model="thresholdAccuracy" :min="0" :max="100" size="small" />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">平均击键上限（次/字）</span>
+            <el-input-number v-model="thresholdPress" :min="0" :max="10" :step="0.1" size="small" />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">未达标时操作</span>
+            <el-select v-model="thresholdAction" size="small">
+              <el-option label="乱序" value="shuffle" />
+              <el-option label="重打当前段" value="retry" />
+              <el-option label="不处理" value="none" />
+            </el-select>
+          </div>
+          <div class="setting-note">
+            * 当任何一项指标未达标时触发所选操作。
+          </div>
+        </template>
+      </div>
+
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
           <p
@@ -312,6 +501,10 @@ function shortPinyin(pinyins: string[]) {
               {{ s }}
             </span>
           </p>
+        </div>
+        <!-- 新增：显示当前分段进度（仅当分段练习开启时） -->
+        <div v-if="enableSegment" class="segment-progress">
+          第 {{ currentSegmentIndex + 1 }} / {{ totalSegments }} 段
         </div>
       </div>
       <div v-else class="editing-text-area">
@@ -473,6 +666,44 @@ function shortPinyin(pinyins: string[]) {
       }
     }
 
+    // 新增：分段设置面板样式
+    .segment-settings {
+      background-color: var(--white);
+      border: 1px solid var(--gray-010);
+      padding: 16px;
+      margin-left: 20px;
+      border-radius: 4px;
+      font-size: 14px;
+
+      h4 {
+        margin: 0 0 12px 0;
+        font-size: 16px;
+        font-weight: bold;
+      }
+
+      .setting-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+
+        .setting-label {
+          width: 120px;
+          flex-shrink: 0;
+        }
+
+        .el-input-number,
+        .el-select {
+          width: 140px;
+        }
+      }
+
+      .setting-note {
+        color: var(--gray-6);
+        font-size: 12px;
+        margin-top: 8px;
+      }
+    }
+
     .text-area {
       position: relative;
       width: 50vw;
@@ -532,6 +763,13 @@ function shortPinyin(pinyins: string[]) {
           font-weight: 900;
           color: @primary-color;
         }
+      }
+
+      .segment-progress {
+        text-align: right;
+        font-size: 12px;
+        color: var(--gray-6);
+        margin-top: 4px;
       }
     }
 
