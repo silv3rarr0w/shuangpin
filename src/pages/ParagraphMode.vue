@@ -141,7 +141,7 @@ const validInput = computed(() => {
 });
 
 // ========== 分段练习设置（使用原生元素）==========
-// 默认值修改：每段字数=10，速度下限=50，准确率下限=100，击键上限=3，未达标操作=乱序
+// 默认值：每段字数=10，速度下限=50，准确率下限=100，击键上限=3，未达标操作=乱序
 const enableSegment = ref(false);
 const segmentSize = ref(10);
 const thresholdSpeed = ref(50);
@@ -443,7 +443,7 @@ watch(index, () => {
         </div>
       </div>
 
-      <!-- 编辑模式：输入框 + 设置面板（在下方） -->
+      <!-- 编辑模式：输入框 + 设置面板（在下方，可滚动） -->
       <div v-else class="editing-text-area">
         <div class="editing-bar">
           <input
@@ -781,10 +781,14 @@ input:checked + .slider:before {
       margin-top: 40px;
       width: 50vw;
       max-width: calc(0.6 * var(--page-max-width));
+      max-height: 80vh; /* 限制最大高度，允许内部滚动 */
+      overflow-y: auto;
+      padding-right: 8px; /* 为滚动条留出空间 */
 
       @media (max-width: 576px) {
         width: 100vw;
         max-width: calc(100vw - var(--app-padding) * 2);
+        max-height: 70vh; /* 移动端适当减小 */
       }
 
       .editing-bar {
@@ -822,15 +826,15 @@ input:checked + .slider:before {
         font-weight: bold;
         outline: none;
         padding: 8px;
-        height: calc(var(--page-height) - 200px);
-        resize: none;
+        height: 150px; /* 固定输入框高度，缩小以让出空间 */
+        resize: vertical; /* 允许用户垂直调整 */
         border: 3px double var(--gray-6);
         color: var(--black);
         background-color: transparent;
         padding-left: 10px;
 
         @media (max-width: 576px) {
-          height: calc(var(--page-height) - 300px);
+          height: 120px; /* 移动端稍小 */
         }
       }
 
