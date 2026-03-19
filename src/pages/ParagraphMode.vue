@@ -38,6 +38,7 @@ const criteria = ref<CriteriaConfig>({
   action: 'noop',
 });
 
+// 加载配置
 onMounted(() => {
   const saved = localStorage.getItem('paragraph-criteria');
   if (saved) {
@@ -49,6 +50,7 @@ onMounted(() => {
   }
 });
 
+// 保存配置
 watch(criteria, (val) => {
   localStorage.setItem('paragraph-criteria', JSON.stringify(val));
 }, { deep: true });
@@ -72,7 +74,7 @@ onDeactivated(() => {
   document.removeEventListener("keypress", onKeyPressed);
 });
 
-// 初始化文章列表
+// 初始化文章列表（补全 Progress 必需属性）
 (function checkArticles() {
   const rawNames = new Set([...Object.keys(rawArticles)]);
   articles.value.forEach((v) => {
@@ -81,13 +83,13 @@ onDeactivated(() => {
 
   rawNames.forEach((v) => {
     const name = v as RawArticleName;
-    const total = rawArticles[name].length;
-    const progress = {
+    const progress: Progress = {
       currentIndex: 0,
-      total,
-      history: new Array(total).fill(false), // 添加 history 属性
-      correctSum: 0,                          // 添加 correctSum 属性
+      total: rawArticles[name].length,
+      history: [],       // 新增必需属性
+      correctSum: 0,     // 新增必需属性
     };
+
     articles.value.push({ progress, type: name });
   });
 })();
@@ -111,6 +113,7 @@ function loadArticleText(article: Article) {
   };
 }
 
+// 跳到下一个有效汉字（非汉字字符跳过）
 function jumpToNextValidHanzi(index: number, text: string) {
   while (index < text.length && getPinyinOf(text[index]).length === 0) {
     index += 1;
@@ -119,8 +122,11 @@ function jumpToNextValidHanzi(index: number, text: string) {
 }
 
 const index = storeToRefs(store).currentArticleIndex;
+
+// 用于存储乱序后的文本（如果有）
 const shuffledTextRef = ref<string | null>(null);
 
+// 构建文章显示结构，显式标注元组类型
 function buildArticleText(text: string): Array<Array<[string, number]>> {
   return text.split('\n').map(line => 
     line.split('').map((char, idx) => [char, idx] as [string, number])
@@ -139,6 +145,7 @@ const article = computed(() => {
   const currentHanzi = info.text[info.progress.currentIndex] ?? "";
   const pinyin = getPinyinOf(currentHanzi);
 
+  // 使用乱序文本（如果有）否则使用原始文本
   const baseText = shuffledTextRef.value ?? info.text;
   const text = buildArticleText(baseText);
 
@@ -235,6 +242,7 @@ watchPostEffect(() => {
   }
 });
 
+// 监听完成事件
 watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
   if (oldVal < article.value.progress.total && newVal >= article.value.progress.total) {
     handleArticleFinish();
@@ -249,7 +257,7 @@ function handleArticleFinish() {
   }
 
   const speed = summary.value.hanziPerMinutes;
-  const accuracy = summary.value.totalAccuracy * 100;
+  const accuracy = summary.value.totalAccuracy * 100;  // 使用 totalAccuracy
   const pressPerHanzi = summary.value.pressPerHanzi;
 
   let meet = true;
@@ -313,15 +321,14 @@ function saveArticle() {
   localStorage.setItem(editingTitle.value, editingContent.value);
   isEditing.value = false;
 
-  const total = editingContent.value.length;
   articles.value.push({
     type: "CUSTOM",
     name: editingTitle.value,
     progress: {
       currentIndex: 0,
-      total,
-      history: new Array(total).fill(false), // 添加 history 属性
-      correctSum: 0,                          // 添加 correctSum 属性
+      total: editingContent.value.length,
+      history: [],       // 新增必需属性
+      correctSum: 0,     // 新增必需属性
     },
   });
 
@@ -574,7 +581,247 @@ function shortPinyin(pinyins: string[]) {
     }
   }
 
-  // 以下为原有样式（省略重复部分，实际项目中保留完整样式）
-  // ... 省略样式，保持与原始文件一致
+  // 以下为原有样式（略）
+  .display-area {
+    padding: 0 64px 32px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    @media (max-width: 576px) {
+      flex-direction: column;
+      padding: var(--app-padding);
+    }
+
+    &.editing {
+      align-items: flex-start;
+      @media (max-width: 576px) {
+        align-items: center;
+      }
+    }
+
+    .p-title {
+      margin-right: 32px;
+      width: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+
+      @media (max-width: 576px) {
+        width: 100vw;
+        padding-right: calc(var(--app-padding) + 2px);
+        margin-right: 0;
+        box-sizing: border-box;
+      }
+
+      .pinyin {
+        font-size: 12px;
+      }
+
+      .title-info {
+        display: flex;
+        align-items: center;
+        margin-top: 8px;
+
+        .answer {
+          font-size: 20px;
+          margin-right: 16px;
+          font-weight: bold;
+          border-top: 1px solid var(--black);
+          border-bottom: 1px solid var(--black);
+        }
+      }
+
+      .title-and-count {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        font-weight: bold;
+        font-size: 12px;
+
+        .title {
+          max-width: 160px;
+          text-align: right;
+
+          @media (max-width: 576px) {
+            max-width: 100vw;
+          }
+        }
+      }
+
+      .article-menu {
+        display: none;
+        height: 110px;
+      }
+    }
+
+    .p-title:hover,
+    .p-title.editing {
+      flex-direction: column;
+
+      @media (max-width: 576px) {
+        align-items: center;
+      }
+
+      .pinyin,
+      .title-info,
+      .title-and-count {
+        display: none;
+      }
+
+      .article-menu {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+
+        .menu {
+          overflow: visible;
+        }
+
+        .delete-btn {
+          color: @primary-color;
+          opacity: 0.5;
+          font-size: 14px;
+          cursor: pointer;
+          font-weight: bold;
+          transition: all ease 0.3s;
+          margin-top: 16px;
+          text-align: center;
+          position: absolute;
+          bottom: -10px;
+          padding-left: 1.4em;
+
+          &:hover {
+            opacity: 1;
+          }
+        }
+      }
+    }
+
+    .text-area {
+      position: relative;
+      width: 50vw;
+      max-width: calc(0.6 * var(--page-max-width));
+
+      @media (max-width: 576px) {
+        width: 100vw;
+        max-width: calc(100vw - var(--app-padding) * 2);
+      }
+
+      &:before {
+        content: "";
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        left: 0;
+        top: 0;
+        background: linear-gradient(
+          0deg,
+          var(--white) 0%,
+          transparent 30%,
+          transparent 70%,
+          var(--white) 100%
+        );
+        pointer-events: none;
+        z-index: 999;
+      }
+
+      .scroll-area {
+        overflow-y: scroll;
+        height: 144px;
+        position: relative;
+        margin: 8px 0;
+
+        @media (max-width: 576px) {
+          height: 30vh;
+        }
+
+        .bg-text {
+          opacity: 0.4;
+        }
+
+        .done-text {
+          opacity: 1;
+        }
+
+        .current-text {
+          text-decoration: underline;
+          text-underline-offset: 2px;
+          opacity: 0.8;
+        }
+      }
+    }
+
+    .editing-text-area {
+      display: flex;
+      flex-direction: column;
+      margin-top: 40px;
+      width: 50vw;
+      max-width: calc(0.6 * var(--page-max-width));
+
+      @media (max-width: 576px) {
+        width: 100vw;
+        max-width: calc(100vw - var(--app-padding) * 2);
+      }
+
+      .editing-bar {
+        display: flex;
+        align-items: center;
+        margin-bottom: 16px;
+
+        .editing-title {
+          font-family: inherit;
+          font-size: 14px;
+          font-weight: bold;
+          border: 0;
+          outline: none;
+          padding: 0 8px;
+          color: @primary-color;
+          border-left: 5px solid @primary-color;
+          flex: 1;
+          background-color: transparent;
+        }
+
+        .save-btn {
+          color: @primary-color;
+          font-size: 14px;
+          cursor: pointer;
+
+          &.disable {
+            color: var(--gray-a);
+          }
+        }
+      }
+
+      .editing-text {
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: bold;
+        border: 0;
+        outline: none;
+        padding: 8px;
+        height: calc(var(--page-height) - 200px);
+        resize: none;
+        border: 3px double var(--gray-6);
+        color: var(--black);
+        background-color: transparent;
+        padding-left: 10px;
+
+        @media (max-width: 576px) {
+          height: calc(var(--page-height) - 300px);
+        }
+      }
+    }
+  }
+
+  .summary {
+    position: absolute;
+    right: var(--app-padding);
+    bottom: var(--app-padding);
+
+    @media (max-width: 576px) {
+      top: 36px;
+    }
+  }
 }
 </style>
