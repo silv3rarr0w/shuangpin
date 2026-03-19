@@ -12,6 +12,7 @@ import {
   onDeactivated,
   onMounted,
   computed,
+  nextTick,
 } from "vue";
 import { useStore } from "../store";
 import { storeToRefs } from "pinia";
@@ -159,6 +160,7 @@ const currentParagraphText = computed(() => {
   if (paragraphs.value.length === 0) return '';
   const para = paragraphs.value[currentParagraphNo.value - 1] || '';
   const text = shuffledCurrentPara.value ?? para;
+  console.log('Current paragraph text:', text);
   return text;
 });
 
@@ -215,17 +217,6 @@ const validInput = computed(() => {
   return editingTitle.value.length > 0 && editingContent.value.length > 0;
 });
 
-// 隐藏输入框引用，用于获得焦点
-const hiddenInput = ref<HTMLInputElement | null>(null);
-
-// 聚焦隐藏输入框
-function focusHiddenInput() {
-  setTimeout(() => {
-    hiddenInput.value?.focus();
-    console.log('Hidden input focused');
-  }, 50);
-}
-
 function onAriticleChange(i: number) {
   index.value = i;
   isEditing.value = i >= articles.value.length;
@@ -233,7 +224,6 @@ function onAriticleChange(i: number) {
   resetParagraphs(info.text);
   summary.value = new TypingSummary();
   console.log('Article changed to:', info.name);
-  focusHiddenInput();
 }
 
 const pinyin = ref<string[]>([]);
@@ -277,10 +267,7 @@ function scrollToFocus() {
   }
 }
 
-onActivated(() => {
-  scrollToFocus();
-  focusHiddenInput();
-});
+onActivated(() => scrollToFocus());
 
 watchPostEffect(() => {
   scrollToFocus();
@@ -360,8 +347,6 @@ function handleParagraphFinish() {
   // 重置统计（下一段重新累计）
   summary.value = new TypingSummary();
   console.log('Summary reset');
-  // 换段后聚焦隐藏输入框
-  focusHiddenInput();
 }
 
 // 进入下一段
@@ -374,8 +359,6 @@ function goToNextParagraph() {
   article.value.progress.currentIndex = 0;
   shuffledCurrentPara.value = null;
   console.log('Go to next paragraph:', currentParagraphNo.value);
-  // 这里也调用聚焦，确保换段后立即获得焦点
-  focusHiddenInput();
 }
 
 // 乱序当前段（保持换行符位置不变）
@@ -436,7 +419,6 @@ function saveArticle() {
   index.value = articles.value.length - 1;
   resetParagraphs(editingContent.value);
   console.log('Custom article saved');
-  focusHiddenInput();
 }
 
 function deleteArticle() {
@@ -460,15 +442,6 @@ function shortPinyin(pinyins: string[]) {
 
 <template>
   <div class="p-mode">
-    <!-- 隐藏输入框，用于捕获键盘焦点 -->
-    <input
-      ref="hiddenInput"
-      type="text"
-      style="position: fixed; top: -100px; left: -100px; opacity: 0; pointer-events: none;"
-      @keydown.stop
-      @keyup.stop
-    />
-
     <!-- 指标与分段设置栏 -->
     <div class="criteria-bar" v-if="!isEditing">
       <div class="criteria-item">
@@ -589,7 +562,8 @@ function shortPinyin(pinyins: string[]) {
       </div>
     </div>
 
-    <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" />
+    <!-- 关键修复：添加 :key 强制重新创建键盘组件，确保事件监听重新挂载 -->
+    <Keyboard v-if="!isEditing" :key="currentParagraphNo" :valid-seq="onSeq" :hints="article.spHints" />
 
     <div v-if="!isEditing" class="summary">
       <TypeSummary
