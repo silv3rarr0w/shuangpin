@@ -28,7 +28,7 @@ interface CriteriaConfig {
   accuracy: number;
   pressPerHanzi: number;
   action: 'noop' | 'retry' | 'shuffle';
-  paragraphSize: number;  // 新增：每段字数
+  paragraphSize: number;
 }
 
 const criteria = ref<CriteriaConfig>({
@@ -37,7 +37,7 @@ const criteria = ref<CriteriaConfig>({
   accuracy: 95,
   pressPerHanzi: 3,
   action: 'noop',
-  paragraphSize: 50,      // 默认每段 50 字
+  paragraphSize: 50,
 });
 
 // 加载配置
@@ -126,9 +126,9 @@ function jumpToNextValidHanzi(index: number, text: string) {
 const index = storeToRefs(store).currentArticleIndex;
 
 // 分段相关状态
-const paragraphs = ref<string[]>([]);          // 所有段落（字符串数组）
-const currentParagraphNo = ref(1);              // 当前段号（从1开始）
-const shuffledCurrentPara = ref<string | null>(null); // 当前段乱序后的文本（如果有）
+const paragraphs = ref<string[]>([]);
+const currentParagraphNo = ref(1);
+const shuffledCurrentPara = ref<string | null>(null);
 
 // 根据文章全文和段落大小重新计算段落
 function splitIntoParagraphs(fullText: string): string[] {
@@ -182,13 +182,12 @@ const article = computed(() => {
 
   return {
     type: info.type,
-    currentDisplay,
     currentChar,
     answer: [...new Set(pinyin)],
     spHints: (store.mode().py2sp.get(pinyin.at(0) ?? "") ?? "").split(""),
     progress: info.progress,
     name: info.name,
-    originalFullText: info.text,  // 保留全文，用于切换文章
+    originalFullText: info.text,
   };
 });
 
@@ -364,7 +363,7 @@ function shuffleCurrentParagraph() {
 
   const shuffled = newLines.join('\n');
   shuffledCurrentPara.value = shuffled;
-  article.value.progress.currentIndex = 0; // 重置段内进度
+  article.value.progress.currentIndex = 0;
 }
 
 function getShortName(s: string, n = 10) {
@@ -501,7 +500,7 @@ function shortPinyin(pinyins: string[]) {
         <div class="scroll-area">
           <p>
             <span
-              v-for="([s, t], si) in article.currentDisplay"
+              v-for="([s, t], si) in currentDisplay"
               :key="si"
               class="bg-text"
               :class="t < article.progress.currentIndex ? 'done-text' : t === article.progress.currentIndex ? 'current-text' : ''"
