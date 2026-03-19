@@ -160,7 +160,6 @@ const currentParagraphText = computed(() => {
   if (paragraphs.value.length === 0) return '';
   const para = paragraphs.value[currentParagraphNo.value - 1] || '';
   const text = shuffledCurrentPara.value ?? para;
-  console.log('Current paragraph text:', text);
   return text;
 });
 
@@ -230,6 +229,7 @@ const pinyin = ref<string[]>([]);
 const isValidPinyin = ref(false);
 
 function onSeq([lead, follow]: [string?, string?]) {
+  console.log('onSeq called', lead, follow);
   for (const answer of article.value.answer) {
     const res = matchSpToPinyin(
       store.mode(),
@@ -251,6 +251,7 @@ function onSeq([lead, follow]: [string?, string?]) {
   const fullInput = !!lead && !!follow;
   if (fullInput) {
     summary.value.onValid(isValidPinyin.value);
+    console.log('Valid input, isValidPinyin:', isValidPinyin.value);
   }
 
   return isValidPinyin.value;
@@ -264,6 +265,9 @@ function scrollToFocus() {
       block: "center",
       behavior: "smooth",
     });
+    console.log('Scrolled to cursor');
+  } else {
+    console.warn('Cursor element not found');
   }
 }
 
@@ -289,6 +293,13 @@ watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
     console.log('Paragraph finished!');
     handleParagraphFinish();
   }
+});
+
+// 监听段落号变化，确保光标可见
+watch(currentParagraphNo, () => {
+  nextTick(() => {
+    scrollToFocus();
+  });
 });
 
 function handleParagraphFinish() {
@@ -359,6 +370,11 @@ function goToNextParagraph() {
   article.value.progress.currentIndex = 0;
   shuffledCurrentPara.value = null;
   console.log('Go to next paragraph:', currentParagraphNo.value);
+
+  // 确保光标可见
+  nextTick(() => {
+    scrollToFocus();
+  });
 }
 
 // 乱序当前段（保持换行符位置不变）
@@ -562,8 +578,7 @@ function shortPinyin(pinyins: string[]) {
       </div>
     </div>
 
-    <!-- 关键修复：添加 :key 强制重新创建键盘组件，确保事件监听重新挂载 -->
-    <Keyboard v-if="!isEditing" :key="currentParagraphNo" :valid-seq="onSeq" :hints="article.spHints" />
+    <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" />
 
     <div v-if="!isEditing" class="summary">
       <TypeSummary
