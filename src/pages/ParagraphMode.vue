@@ -21,13 +21,14 @@ import { getPinyinOf } from "../utils/hanzi";
 import { matchSpToPinyin } from "../utils/keyboard";
 import { TypingSummary } from "../utils/summary";
 
-// 指标配置接口（持久化到 localStorage）
+// ---------- 指标与分段配置接口 ----------
 interface CriteriaConfig {
   open: boolean;
   speed: number;
   accuracy: number;
   pressPerHanzi: number;
   action: 'noop' | 'retry' | 'shuffle';
+  paragraphSize: number;  // 新增：每段字数
 }
 
 const criteria = ref<CriteriaConfig>({
@@ -36,6 +37,7 @@ const criteria = ref<CriteriaConfig>({
   accuracy: 95,
   pressPerHanzi: 3,
   action: 'noop',
+  paragraphSize: 50,      // 默认每段 50 字
 });
 
 // 加载配置
@@ -55,7 +57,7 @@ watch(criteria, (val) => {
   localStorage.setItem('paragraph-criteria', JSON.stringify(val));
 }, { deep: true });
 
-// ---------- 原有 store 和状态 ----------
+// ---------- Store 和状态 ----------
 const store = useStore();
 const articles = storeToRefs(store).articles;
 const settings = storeToRefs(store).settings;
@@ -86,8 +88,8 @@ onDeactivated(() => {
     const progress: Progress = {
       currentIndex: 0,
       total: rawArticles[name].length,
-      history: [],       // 新增必需属性
-      correctSum: 0,     // 新增必需属性
+      history: [],
+      correctSum: 0,
     };
 
     articles.value.push({ progress, type: name });
@@ -123,41 +125,70 @@ function jumpToNextValidHanzi(index: number, text: string) {
 
 const index = storeToRefs(store).currentArticleIndex;
 
-// 用于存储乱序后的文本（如果有）
-const shuffledTextRef = ref<string | null>(null);
+// 分段相关状态
+const paragraphs = ref<string[]>([]);          // 所有段落（字符串数组）
+const currentParagraphNo = ref(1);              // 当前段号（从1开始）
+const shuffledCurrentPara = ref<string | null>(null); // 当前段乱序后的文本（如果有）
 
-// 构建文章显示结构，显式标注元组类型
-function buildArticleText(text: string): Array<Array<[string, number]>> {
-  return text.split('\n').map(line => 
-    line.split('').map((char, idx) => [char, idx] as [string, number])
-  );
+// 根据文章全文和段落大小重新计算段落
+function splitIntoParagraphs(fullText: string): string[] {
+  const result: string[] = [];
+  const size = criteria.value.paragraphSize;
+  for (let i = 0; i < fullText.length; i += size) {
+    result.push(fullText.slice(i, i + size));
+  }
+  return result;
 }
+
+// 切换文章时重新计算段落
+function resetParagraphs(fullText: string) {
+  paragraphs.value = splitIntoParagraphs(fullText);
+  currentParagraphNo.value = 1;
+  shuffledCurrentPara.value = null;
+  // 重置段内进度
+  const info = loadArticleText(articles.value[index.value % articles.value.length]);
+  info.progress.currentIndex = 0;
+}
+
+// 获取当前段实际显示的文本（若乱序则用乱序版本）
+const currentParagraphText = computed(() => {
+  if (paragraphs.value.length === 0) return '';
+  const para = paragraphs.value[currentParagraphNo.value - 1] || '';
+  return shuffledCurrentPara.value ?? para;
+});
+
+// 构建当前段显示结构（[字符, 段内偏移]）
+const currentDisplay = computed<Array<[string, number]>>(() => {
+  return currentParagraphText.value.split('').map((char, idx) => [char, idx]);
+});
 
 const article = computed(() => {
   const articleIndex = index.value % articles.value.length;
   const info = loadArticleText(articles.value[articleIndex]);
 
-  info.progress.currentIndex = jumpToNextValidHanzi(
-    info.progress.currentIndex,
-    info.text
-  );
+  // 如果是第一次加载或全文变化，重新分段
+  if (paragraphs.value.length === 0) {
+    resetParagraphs(info.text);
+  }
 
-  const currentHanzi = info.text[info.progress.currentIndex] ?? "";
-  const pinyin = getPinyinOf(currentHanzi);
+  const currentParaText = currentParagraphText.value;
+  // 确保当前索引不超过段落长度
+  if (info.progress.currentIndex >= currentParaText.length) {
+    info.progress.currentIndex = 0;
+  }
 
-  // 使用乱序文本（如果有）否则使用原始文本
-  const baseText = shuffledTextRef.value ?? info.text;
-  const text = buildArticleText(baseText);
+  const currentChar = currentParaText[info.progress.currentIndex] ?? "";
+  const pinyin = getPinyinOf(currentChar);
 
   return {
     type: info.type,
-    text,
-    currentHanzi,
+    currentDisplay,
+    currentChar,
     answer: [...new Set(pinyin)],
     spHints: (store.mode().py2sp.get(pinyin.at(0) ?? "") ?? "").split(""),
     progress: info.progress,
     name: info.name,
-    originalText: info.text,
+    originalFullText: info.text,  // 保留全文，用于切换文章
   };
 });
 
@@ -183,7 +214,8 @@ const validInput = computed(() => {
 function onAriticleChange(i: number) {
   index.value = i;
   isEditing.value = i >= articles.value.length;
-  shuffledTextRef.value = null;
+  const info = loadArticleText(articles.value[i % articles.value.length]);
+  resetParagraphs(info.text);
   summary.value = new TypingSummary();
 }
 
@@ -242,22 +274,24 @@ watchPostEffect(() => {
   }
 });
 
-// 监听完成事件
-watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
-  if (oldVal < article.value.progress.total && newVal >= article.value.progress.total) {
-    handleArticleFinish();
+// 监听当前段是否完成
+watch(() => article.value.progress.currentIndex, (newVal) => {
+  const paraLength = currentParagraphText.value.length;
+  if (paraLength > 0 && newVal >= paraLength) {
+    handleParagraphFinish();
   }
 });
 
-function handleArticleFinish() {
+function handleParagraphFinish() {
+  // 一段打完，检查指标
   if (!criteria.value.open) {
-    article.value.progress.currentIndex = 0;
-    summary.value = new TypingSummary();
+    // 未开启指标，直接进入下一段
+    goToNextParagraph();
     return;
   }
 
   const speed = summary.value.hanziPerMinutes;
-  const accuracy = summary.value.totalAccuracy * 100;  // 使用 totalAccuracy
+  const accuracy = summary.value.totalAccuracy * 100;
   const pressPerHanzi = summary.value.pressPerHanzi;
 
   let meet = true;
@@ -266,46 +300,71 @@ function handleArticleFinish() {
   if (criteria.value.pressPerHanzi > 0 && pressPerHanzi > criteria.value.pressPerHanzi) meet = false;
 
   if (!meet) {
+    // 未达标，根据动作处理
     switch (criteria.value.action) {
       case 'retry':
+        // 重打本段：重置段内进度
         article.value.progress.currentIndex = 0;
         break;
       case 'shuffle':
-        shuffleArticle();
+        // 乱序本段
+        shuffleCurrentParagraph();
         break;
       case 'noop':
-        article.value.progress.currentIndex = 0;
+        // 不处理，直接进入下一段
+        goToNextParagraph();
         break;
     }
   } else {
-    article.value.progress.currentIndex = 0;
+    // 达标，进入下一段
+    goToNextParagraph();
   }
 
+  // 重置统计（下一段重新累计）
   summary.value = new TypingSummary();
 }
 
-function shuffleArticle() {
-  const original = article.value.originalText;
-  const paragraphs = original.split('\n');
-  const lengths = paragraphs.map(p => p.length);
+// 进入下一段
+function goToNextParagraph() {
+  if (currentParagraphNo.value < paragraphs.value.length) {
+    currentParagraphNo.value++;
+    article.value.progress.currentIndex = 0;
+    shuffledCurrentPara.value = null; // 清除乱序状态
+  } else {
+    // 所有段落打完，可循环或提示
+    // 这里简单循环到第一段
+    currentParagraphNo.value = 1;
+    article.value.progress.currentIndex = 0;
+    shuffledCurrentPara.value = null;
+  }
+}
 
+// 乱序当前段（保持换行符位置不变）
+function shuffleCurrentParagraph() {
+  const original = paragraphs.value[currentParagraphNo.value - 1];
+  // 按换行符分割
+  const lines = original.split('\n');
+  const lengths = lines.map(l => l.length);
+
+  // 将所有字符打平并打乱
   const allChars = original.split('');
   for (let i = allChars.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allChars[i], allChars[j]] = [allChars[j], allChars[i]];
   }
 
-  let newParagraphs: string[] = [];
+  // 按原行长度重新分配
+  let newLines: string[] = [];
   let start = 0;
   for (let len of lengths) {
     const end = start + len;
-    newParagraphs.push(allChars.slice(start, end).join(''));
+    newLines.push(allChars.slice(start, end).join(''));
     start = end;
   }
 
-  const shuffled = newParagraphs.join('\n');
-  shuffledTextRef.value = shuffled;
-  article.value.progress.currentIndex = 0;
+  const shuffled = newLines.join('\n');
+  shuffledCurrentPara.value = shuffled;
+  article.value.progress.currentIndex = 0; // 重置段内进度
 }
 
 function getShortName(s: string, n = 10) {
@@ -327,14 +386,15 @@ function saveArticle() {
     progress: {
       currentIndex: 0,
       total: editingContent.value.length,
-      history: [],       // 新增必需属性
-      correctSum: 0,     // 新增必需属性
+      history: [],
+      correctSum: 0,
     },
   });
 
   editingTitle.value = "";
   editingContent.value = "";
   index.value = articles.value.length - 1;
+  resetParagraphs(editingContent.value);
 }
 
 function deleteArticle() {
@@ -357,7 +417,7 @@ function shortPinyin(pinyins: string[]) {
 
 <template>
   <div class="p-mode">
-    <!-- 指标设置栏 -->
+    <!-- 指标与分段设置栏 -->
     <div class="criteria-bar" v-if="!isEditing">
       <div class="criteria-item">
         <span class="criteria-label">指标</span>
@@ -388,9 +448,17 @@ function shortPinyin(pinyins: string[]) {
           </select>
         </div>
       </template>
+      <!-- 分段设置：每段字数 -->
+      <div class="criteria-item">
+        <span class="criteria-label">每段字数</span>
+        <input type="number" v-model.number="criteria.paragraphSize" min="1" step="1" class="criteria-input" @change="resetParagraphs(article.originalFullText)" />
+      </div>
+      <div class="criteria-item">
+        <span class="criteria-label">段 {{ currentParagraphNo }}/{{ paragraphs.length }}</span>
+      </div>
     </div>
 
-    <!-- 显示区域 -->
+    <!-- 显示区域：只显示当前段 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
         <div class="pinyin">
@@ -403,8 +471,7 @@ function shortPinyin(pinyins: string[]) {
           </div>
           <div class="title-and-count">
             <div class="count">
-              {{ article.progress.currentIndex }} 字 /
-              {{ article.progress.total }} 字
+              {{ article.progress.currentIndex }} / {{ currentParagraphText.length }} 字
             </div>
             <div class="title">
               {{ getShortName(article.name) }}
@@ -429,15 +496,16 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
+      <!-- 当前段文字显示 -->
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
-          <p v-for="(p, i) in article.text" :key="i">
+          <p>
             <span
-              v-for="([s, t], si) in p"
+              v-for="([s, t], si) in article.currentDisplay"
               :key="si"
               class="bg-text"
-              :class="t < 0 ? 'done-text' : t === 0 ? 'current-text' : ''"
-              :id="t === 0 ? 'cursor' : ''"
+              :class="t < article.progress.currentIndex ? 'done-text' : t === article.progress.currentIndex ? 'current-text' : ''"
+              :id="t === article.progress.currentIndex ? 'cursor' : ''"
             >
               {{ s }}
             </span>
@@ -445,6 +513,7 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
+      <!-- 编辑区域（新建文章时） -->
       <div v-else class="editing-text-area">
         <div class="editing-bar">
           <input
@@ -581,7 +650,6 @@ function shortPinyin(pinyins: string[]) {
     }
   }
 
-  // 以下为原有样式（略）
   .display-area {
     padding: 0 64px 32px 32px;
     display: flex;
