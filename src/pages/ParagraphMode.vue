@@ -17,17 +17,17 @@ import { useStore } from "../store";
 import { storeToRefs } from "pinia";
 
 import rawArticles from "../utils/article.json";
-import { getPinyinOf, hanziMap } from "../utils/hanzi";
+import { getPinyinOf } from "../utils/hanzi";  // 不再导入 hanziMap
 import { matchSpToPinyin } from "../utils/keyboard";
 import { TypingSummary } from "../utils/summary";
 
-// ---------- 新增：指标配置（持久化到 localStorage） ----------
+// 指标配置接口（持久化到 localStorage）
 interface CriteriaConfig {
-  open: boolean;           // 是否开启指标监测
-  speed: number;           // 速度阈值（字/分），≤0表示不检查
-  accuracy: number;        // 键准阈值（%），≤0表示不检查
-  pressPerHanzi: number;   // 每字击键阈值，≤0表示不检查
-  action: 'noop' | 'retry' | 'shuffle'; // 未达标时的动作
+  open: boolean;
+  speed: number;
+  accuracy: number;
+  pressPerHanzi: number;
+  action: 'noop' | 'retry' | 'shuffle';
 }
 
 const criteria = ref<CriteriaConfig>({
@@ -38,7 +38,7 @@ const criteria = ref<CriteriaConfig>({
   action: 'noop',
 });
 
-// 从 localStorage 加载配置
+// 加载配置
 onMounted(() => {
   const saved = localStorage.getItem('paragraph-criteria');
   if (saved) {
@@ -50,12 +50,12 @@ onMounted(() => {
   }
 });
 
-// 保存配置到 localStorage
+// 保存配置
 watch(criteria, (val) => {
   localStorage.setItem('paragraph-criteria', JSON.stringify(val));
 }, { deep: true });
 
-// ---------- 原有代码 ----------
+// ---------- 原有 store 和状态 ----------
 const store = useStore();
 const articles = storeToRefs(store).articles;
 const settings = storeToRefs(store).settings;
@@ -74,7 +74,7 @@ onDeactivated(() => {
   document.removeEventListener("keypress", onKeyPressed);
 });
 
-// 初始化文章列表（从 rawArticles 和 localStorage 加载）
+// 初始化文章列表
 (function checkArticles() {
   const rawNames = new Set([...Object.keys(rawArticles)]);
   articles.value.forEach((v) => {
@@ -86,8 +86,7 @@ onDeactivated(() => {
     const progress: Progress = {
       currentIndex: 0,
       total: rawArticles[name].length,
-      correctTry: 0,
-      totalTry: 0,
+      // 去掉 correctTry 和 totalTry
     };
 
     articles.value.push({ progress, type: name });
@@ -113,8 +112,9 @@ function loadArticleText(article: Article) {
   };
 }
 
+// 跳到下一个有效汉字（非汉字字符跳过）
 function jumpToNextValidHanzi(index: number, text: string) {
-  while (index < text.length && !hanziMap.h2p.has(text[index])) {
+  while (index < text.length && getPinyinOf(text[index]).length === 0) {
     index += 1;
   }
   return index;
@@ -122,12 +122,14 @@ function jumpToNextValidHanzi(index: number, text: string) {
 
 const index = storeToRefs(store).currentArticleIndex;
 
-// ---------- 新增：用于乱序后存储打乱文本的引用 ----------
+// 用于存储乱序后的文本（如果有）
 const shuffledTextRef = ref<string | null>(null);
 
-// 构建文章显示结构（二维数组，每个元素为 [字符, 相对位置]）
-function buildArticleText(text: string) {
-  return text.split('\n').map(line => line.split('').map((char, idx) => [char, idx]));
+// 构建文章显示结构，显式标注元组类型
+function buildArticleText(text: string): Array<Array<[string, number]>> {
+  return text.split('\n').map(line => 
+    line.split('').map((char, idx) => [char, idx] as [string, number])
+  );
 }
 
 const article = computed(() => {
@@ -154,7 +156,7 @@ const article = computed(() => {
     spHints: (store.mode().py2sp.get(pinyin.at(0) ?? "") ?? "").split(""),
     progress: info.progress,
     name: info.name,
-    originalText: info.text, // 保留原始文本，用于乱序
+    originalText: info.text,
   };
 });
 
@@ -180,9 +182,7 @@ const validInput = computed(() => {
 function onAriticleChange(i: number) {
   index.value = i;
   isEditing.value = i >= articles.value.length;
-  // 切换文章时清除乱序状态
   shuffledTextRef.value = null;
-  // 重置统计数据
   summary.value = new TypingSummary();
 }
 
@@ -241,81 +241,59 @@ watchPostEffect(() => {
   }
 });
 
-// ---------- 移除原有的自动重置 watchEffect，改用自定义完成检测 ----------
-// watchEffect(() => {
-//   if (article.value.progress.currentIndex >= article.value.progress.total) {
-//     article.value.progress.currentIndex = 0;
-//   }
-// });
-
-// 监听当前索引，检测是否完成一篇文章
+// 监听完成事件
 watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
-  // 当从小于总数变为大于等于总数时，表示刚完成一篇文章
   if (oldVal < article.value.progress.total && newVal >= article.value.progress.total) {
     handleArticleFinish();
   }
 });
 
-// 文章完成时的处理
 function handleArticleFinish() {
-  // 如果未开启指标，直接重置进度并重新开始
   if (!criteria.value.open) {
     article.value.progress.currentIndex = 0;
     summary.value = new TypingSummary();
     return;
   }
 
-  // 获取当前文章的统计数据
   const speed = summary.value.hanziPerMinutes;
-  const accuracy = summary.value.accuracy * 100; // 转换为百分比
+  const accuracy = summary.value.totalAccuracy * 100;  // 使用 totalAccuracy
   const pressPerHanzi = summary.value.pressPerHanzi;
 
-  // 检查是否达标
   let meet = true;
   if (criteria.value.speed > 0 && speed < criteria.value.speed) meet = false;
   if (criteria.value.accuracy > 0 && accuracy < criteria.value.accuracy) meet = false;
   if (criteria.value.pressPerHanzi > 0 && pressPerHanzi > criteria.value.pressPerHanzi) meet = false;
 
   if (!meet) {
-    // 未达标，根据配置执行动作
     switch (criteria.value.action) {
       case 'retry':
-        // 重打：重置进度到开头
         article.value.progress.currentIndex = 0;
         break;
       case 'shuffle':
-        // 乱序：打乱文章内容
         shuffleArticle();
         break;
       case 'noop':
-        // 不处理，正常进入下一轮
         article.value.progress.currentIndex = 0;
         break;
     }
   } else {
-    // 达标，正常重置进度
     article.value.progress.currentIndex = 0;
   }
 
-  // 无论达标与否，重置统计数据（下一轮重新累计）
   summary.value = new TypingSummary();
 }
 
-// 乱序文章
 function shuffleArticle() {
   const original = article.value.originalText;
-  // 按换行符分割段落
   const paragraphs = original.split('\n');
   const lengths = paragraphs.map(p => p.length);
 
-  // 将所有字符打平并打乱
   const allChars = original.split('');
   for (let i = allChars.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allChars[i], allChars[j]] = [allChars[j], allChars[i]];
   }
 
-  // 按原段落长度重新分配字符
   let newParagraphs: string[] = [];
   let start = 0;
   for (let len of lengths) {
@@ -324,11 +302,8 @@ function shuffleArticle() {
     start = end;
   }
 
-  // 用换行符连接成新文本
   const shuffled = newParagraphs.join('\n');
   shuffledTextRef.value = shuffled;
-
-  // 重置进度
   article.value.progress.currentIndex = 0;
 }
 
@@ -351,8 +326,7 @@ function saveArticle() {
     progress: {
       currentIndex: 0,
       total: editingContent.value.length,
-      correctTry: 0,
-      totalTry: 0,
+      // 去掉 correctTry 和 totalTry
     },
   });
 
@@ -381,7 +355,7 @@ function shortPinyin(pinyins: string[]) {
 
 <template>
   <div class="p-mode">
-    <!-- 新增：指标设置栏（非编辑模式下显示） -->
+    <!-- 指标设置栏 -->
     <div class="criteria-bar" v-if="!isEditing">
       <div class="criteria-item">
         <span class="criteria-label">指标</span>
@@ -414,7 +388,7 @@ function shortPinyin(pinyins: string[]) {
       </template>
     </div>
 
-    <!-- 原有显示区域 -->
+    <!-- 显示区域 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
         <div class="pinyin">
@@ -453,7 +427,6 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
-      <!-- 文章正文显示区域 -->
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
           <p v-for="(p, i) in article.text" :key="i">
@@ -470,7 +443,6 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
-      <!-- 编辑区域（新建文章时） -->
       <div v-else class="editing-text-area">
         <div class="editing-bar">
           <input
@@ -494,14 +466,12 @@ function shortPinyin(pinyins: string[]) {
       </div>
     </div>
 
-    <!-- 虚拟键盘（非编辑模式） -->
     <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" />
 
-    <!-- 实时统计摘要 -->
     <div v-if="!isEditing" class="summary">
       <TypeSummary
         :speed="summary.hanziPerMinutes"
-        :accuracy="summary.accuracy"
+        :accuracy="summary.totalAccuracy"
         :avgpress="summary.pressPerHanzi"
       />
     </div>
@@ -561,7 +531,6 @@ function shortPinyin(pinyins: string[]) {
         font-size: 14px;
       }
 
-      /* 简单的开关样式 */
       .switch {
         position: relative;
         display: inline-block;
@@ -610,7 +579,7 @@ function shortPinyin(pinyins: string[]) {
     }
   }
 
-  // 其余原有样式保持不变...
+  // 以下为原有样式（略）
   .display-area {
     padding: 0 64px 32px 32px;
     display: flex;
