@@ -752,7 +752,7 @@ function shortPinyin(pinyins: string[]) {
         .bg-text {
           // 未打字，高对比度
           opacity: 1;
-          font-size: 60px; // 确保继承全局字体大小
+          font-size: 50px; // 确保继承全局字体大小
         }
 
         .done-text {
