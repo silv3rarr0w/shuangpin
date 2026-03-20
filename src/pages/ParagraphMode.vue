@@ -453,8 +453,8 @@ function shortPinyin(pinyins: string[]) {
 </script>
 
 <template>
-  <!-- 根元素绑定字体大小和字体家族，响应全局设置 -->
-  <div class="p-mode" :style="{ fontSize: settings.fontSize, fontFamily: settings['fontFamily'] }">
+  <!-- 根元素绑定字体大小，响应全局设置 -->
+  <div class="p-mode" :style="{ fontSize: settings.fontSize }">
     <!-- 顶部区域：文章标题和菜单 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
