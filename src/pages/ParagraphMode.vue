@@ -128,7 +128,7 @@ function jumpToNextValidHanzi(index: number, text: string) {
 
 const index = storeToRefs(store).currentArticleIndex;
 
-// 分段相关状态（仅当 criteria.open 为 true 时使用）
+// 分段相关状态
 const paragraphs = ref<string[]>([]);
 const currentParagraphNo = ref(1);
 const shuffledCurrentPara = ref<string | null>(null);
@@ -144,70 +144,42 @@ function splitIntoParagraphs(fullText: string): string[] {
   return result;
 }
 
-// 切换文章或切换开关时重新计算分段状态
+// 切换文章时重新计算段落
 function resetParagraphs(fullText: string) {
-  if (criteria.value.open) {
-    paragraphs.value = splitIntoParagraphs(fullText);
-    currentParagraphNo.value = 1;
-    shuffledCurrentPara.value = null;
-  } else {
-    // 开关关闭，清除分段数据
-    paragraphs.value = [];
-    currentParagraphNo.value = 1;
-    shuffledCurrentPara.value = null;
-  }
-  // 重置进度
+  paragraphs.value = splitIntoParagraphs(fullText);
+  currentParagraphNo.value = 1;
+  shuffledCurrentPara.value = null;
+  // 重置段内进度
   const info = loadArticleText(articles.value[index.value % articles.value.length]);
   info.progress.currentIndex = 0;
   console.log('Reset paragraphs, total paragraphs:', paragraphs.value.length);
 }
 
-// 监听指标开关变化，重新初始化分段和进度
-watch(() => criteria.value.open, () => {
-  const info = loadArticleText(articles.value[index.value % articles.value.length]);
-  resetParagraphs(info.text);
-  // 重置统计
-  summary.value = new TypingSummary();
+// 获取当前段实际显示的文本（若乱序则用乱序版本）
+const currentParagraphText = computed(() => {
+  if (paragraphs.value.length === 0) return '';
+  const para = paragraphs.value[currentParagraphNo.value - 1] || '';
+  const text = shuffledCurrentPara.value ?? para;
+  return text;
 });
 
-// 监听每段字数变化，重新分段
-watch(() => criteria.value.paragraphSize, () => {
-  if (criteria.value.open) {
-    const info = loadArticleText(articles.value[index.value % articles.value.length]);
-    resetParagraphs(info.text);
-  }
-});
-
-// 获取当前要显示的文本（全文或当前段）
-const displayText = computed(() => {
-  const info = loadArticleText(articles.value[index.value % articles.value.length]);
-  if (!criteria.value.open) {
-    // 未开启分段：显示全文
-    return info.text;
-  } else {
-    // 开启分段：显示当前段（可能乱序）
-    if (paragraphs.value.length === 0) return '';
-    const para = paragraphs.value[currentParagraphNo.value - 1] || '';
-    return shuffledCurrentPara.value ?? para;
-  }
-});
-
-// 当前显示的字符数组（每个字符带位置索引）
+// 构建当前段显示结构（[字符, 段内偏移]）
 const currentDisplay = computed<Array<[string, number]>>(() => {
-  return displayText.value.split('').map((char, idx) => [char, idx]);
+  return currentParagraphText.value.split('').map((char, idx) => [char, idx]);
 });
 
 const article = computed(() => {
   const articleIndex = index.value % articles.value.length;
   const info = loadArticleText(articles.value[articleIndex]);
 
-  // 确保进度索引不超过文本长度
-  const maxIndex = displayText.value.length;
-  if (info.progress.currentIndex >= maxIndex) {
-    info.progress.currentIndex = 0;
+  // 如果是第一次加载或全文变化，重新分段
+  if (paragraphs.value.length === 0) {
+    resetParagraphs(info.text);
   }
 
-  const currentChar = displayText.value[info.progress.currentIndex] ?? "";
+  const currentParaText = currentParagraphText.value;
+  // 不再自动重置索引，让索引可以超过长度以便触发完成检测
+  const currentChar = currentParaText[info.progress.currentIndex] ?? "";
   const pinyin = getPinyinOf(currentChar);
 
   return {
@@ -309,13 +281,13 @@ watchPostEffect(() => {
   }
 });
 
-// 监听当前段是否完成（仅当开启分段时）
+// 监听当前段是否完成
 watch(() => article.value.progress.currentIndex, (newVal, oldVal) => {
-  const totalLength = displayText.value.length;
-  console.log(`Index changed: ${oldVal} -> ${newVal}, totalLength=${totalLength}`);
-  if (totalLength > 0 && newVal >= totalLength && oldVal < totalLength) {
-    console.log('Text finished!');
-    handleFinish();
+  const paraLength = currentParagraphText.value.length;
+  console.log(`Index changed: ${oldVal} -> ${newVal}, paraLength=${paraLength}`);
+  if (paraLength > 0 && newVal >= paraLength && oldVal < paraLength) {
+    console.log('Paragraph finished!');
+    handleParagraphFinish();
   }
 });
 
@@ -326,13 +298,10 @@ watch(currentParagraphNo, () => {
   });
 });
 
-function handleFinish() {
-  // 一段（或全文）打完，检查指标
-  if (!criteria.value.open) {
-    // 未开启指标或未开启分段：直接重置进度，重新开始
-    article.value.progress.currentIndex = 0;
-    summary.value = new TypingSummary();
-    console.log('全文完成，重置进度');
+function handleParagraphFinish() {
+  // 防止重复调用
+  if (article.value.progress.currentIndex < currentParagraphText.value.length) {
+    console.log('handleParagraphFinish called but not finished?');
     return;
   }
 
@@ -341,6 +310,13 @@ function handleFinish() {
   console.log('Speed:', summary.value.hanziPerMinutes, 'Threshold:', criteria.value.speed);
   console.log('Accuracy:', summary.value.totalAccuracy * 100, 'Threshold:', criteria.value.accuracy);
   console.log('Press per Hanzi:', summary.value.pressPerHanzi, 'Threshold:', criteria.value.pressPerHanzi);
+
+  // 一段打完，检查指标
+  if (!criteria.value.open) {
+    console.log('Criteria not open, go to next paragraph');
+    goToNextParagraph();
+    return;
+  }
 
   const speed = summary.value.hanziPerMinutes;
   const accuracy = summary.value.totalAccuracy * 100;
@@ -355,6 +331,7 @@ function handleFinish() {
 
   if (!meet) {
     console.log('Not meet, action:', criteria.value.action);
+    // 未达标，根据动作处理
     switch (criteria.value.action) {
       case 'retry':
         // 重打本段：重置段内进度
@@ -379,33 +356,38 @@ function handleFinish() {
   console.log('Summary reset');
 }
 
+// 进入下一段
 function goToNextParagraph() {
   if (currentParagraphNo.value < paragraphs.value.length) {
     currentParagraphNo.value++;
   } else {
-    // 全部段落打完，循环到第一段
     currentParagraphNo.value = 1;
   }
   article.value.progress.currentIndex = 0;
   shuffledCurrentPara.value = null;
   console.log('Go to next paragraph:', currentParagraphNo.value);
 
+  // 确保光标可见
   nextTick(() => {
     scrollToFocus();
   });
 }
 
+// 乱序当前段（保持换行符位置不变）
 function shuffleCurrentParagraph() {
   const original = paragraphs.value[currentParagraphNo.value - 1];
+  // 按换行符分割
   const lines = original.split('\n');
   const lengths = lines.map(l => l.length);
 
+  // 将所有字符打平并打乱
   const allChars = original.split('');
   for (let i = allChars.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allChars[i], allChars[j]] = [allChars[j], allChars[i]];
   }
 
+  // 按原行长度重新分配
   let newLines: string[] = [];
   let start = 0;
   for (let len of lengths) {
@@ -472,7 +454,7 @@ function shortPinyin(pinyins: string[]) {
 
 <template>
   <!-- 根元素绑定字体大小，以响应全局设置 -->
-  <div class="p-mode" :style="{ fontSize: typeof settings.fontSize === 'number' ? settings.fontSize + 'rem' : settings.fontSize }">
+  <div class="p-mode" :style="{ fontSize: settings.fontSize }">
     <!-- 顶部区域：文章标题和菜单 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
@@ -486,7 +468,7 @@ function shortPinyin(pinyins: string[]) {
           </div>
           <div class="title-and-count">
             <div class="count">
-              {{ article.progress.currentIndex }} / {{ displayText.length }} 字
+              {{ article.progress.currentIndex }} / {{ currentParagraphText.length }} 字
             </div>
             <div class="title">
               {{ getShortName(article.name) }}
@@ -511,7 +493,7 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
 
-      <!-- 当前文字显示区域（全文或当前段） -->
+      <!-- 当前段文字显示区域 -->
       <div v-if="!isEditing" class="text-area">
         <div class="scroll-area">
           <p>
@@ -619,10 +601,10 @@ function shortPinyin(pinyins: string[]) {
 .p-mode {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100vh; // 使用视口高度，让底部区域固定
 
   .display-area {
-    flex: 1;
+    flex: 1; // 占据剩余空间
     padding: 0 64px 32px 32px;
     display: flex;
     align-items: center;
@@ -750,10 +732,10 @@ function shortPinyin(pinyins: string[]) {
 
       .scroll-area {
         overflow-y: scroll;
-        height: 240px;
+        height: 240px; // 增加高度，拉长打字区域
         position: relative;
         margin: 8px 0;
-        font-size: inherit;
+        font-size: 1em; // 继承根元素字体大小，响应全局设置
 
         @media (max-width: 576px) {
           height: 30vh;
@@ -761,19 +743,16 @@ function shortPinyin(pinyins: string[]) {
 
         .bg-text {
           opacity: 1;
-          color: var(--black);
         }
 
         .done-text {
           opacity: 0.2;
-          color: var(--black);
         }
 
         .current-text {
           text-decoration: underline;
           text-underline-offset: 2px;
           opacity: 0.8;
-          font-weight: bold;
         }
       }
     }
@@ -842,7 +821,7 @@ function shortPinyin(pinyins: string[]) {
 
   // 底部区域（指标栏 + 键盘）
   .bottom-area {
-    flex-shrink: 0;
+    flex-shrink: 0; // 防止被压缩
     background: var(--gray-f8);
     border-top: 1px solid var(--gray-e0);
     padding: 8px 16px;
@@ -853,7 +832,7 @@ function shortPinyin(pinyins: string[]) {
       align-items: center;
       gap: 1rem;
       font-size: 14px;
-      margin-bottom: 8px;
+      margin-bottom: 8px; // 与键盘留出间距
 
       @media (max-width: 576px) {
         gap: 0.5rem;
@@ -884,6 +863,7 @@ function shortPinyin(pinyins: string[]) {
             width: 60px;
           }
 
+          // 暗黑模式适配（通过 CSS 变量自动切换）
           &:focus {
             border-color: @primary-color;
             outline: none;
@@ -944,18 +924,20 @@ function shortPinyin(pinyins: string[]) {
       }
     }
 
+    // 进一步缩小虚拟键盘
     .small-keyboard {
-      transform: scale(0.7);
+      transform: scale(0.65);
       transform-origin: bottom center;
-      margin-bottom: -15px;
+      margin-bottom: -18px; // 补偿缩放造成的空白
 
+      // 缩小键盘内部文字（通过深度选择器覆盖 Keyboard 组件的样式）
       :deep(.key-item) {
         .main-key {
-          font-size: 1.2rem;
+          font-size: 1.1rem;
         }
         .follow-key,
         .lead-key {
-          font-size: 0.8rem;
+          font-size: 0.7rem;
         }
       }
     }
@@ -964,8 +946,8 @@ function shortPinyin(pinyins: string[]) {
   .summary {
     position: absolute;
     right: var(--app-padding);
-    bottom: 140px;
-    z-index: 1000;
+    bottom: 140px; // 调整到底部栏上方
+    z-index: 1000; // 确保不被覆盖
     background: var(--white);
     padding: 8px 16px;
     border-radius: 8px;
