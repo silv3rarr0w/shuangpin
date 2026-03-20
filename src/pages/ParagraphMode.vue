@@ -735,7 +735,6 @@ function shortPinyin(pinyins: string[]) {
         height: 240px; // 增加高度，拉长打字区域
         position: relative;
         margin: 8px 0;
-        font-size: 1em; // 继承根元素字体大小，响应全局设置
 
         @media (max-width: 576px) {
           height: 30vh;
@@ -926,18 +925,18 @@ function shortPinyin(pinyins: string[]) {
 
     // 进一步缩小虚拟键盘
     .small-keyboard {
-      transform: scale(0.65);
+      transform: scale(0.7);
       transform-origin: bottom center;
-      margin-bottom: -18px; // 补偿缩放造成的空白
+      margin-bottom: -15px; // 补偿缩放造成的空白
 
       // 缩小键盘内部文字（通过深度选择器覆盖 Keyboard 组件的样式）
       :deep(.key-item) {
         .main-key {
-          font-size: 1.1rem;
+          font-size: 1.2rem;
         }
         .follow-key,
         .lead-key {
-          font-size: 0.7rem;
+          font-size: 0.8rem;
         }
       }
     }
