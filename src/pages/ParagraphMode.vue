@@ -744,19 +744,21 @@ function shortPinyin(pinyins: string[]) {
           // 未打字，高对比度
           opacity: 1;
           font-size: inherit; // 确保继承全局字体大小
+          color: var(--text-color); // 使用主题色（暗黑模式自动切换）
         }
 
         .done-text {
-          // 已打字，加深颜色，突出已完成
+          // 已打字，突出已完成
           opacity: 1;
-          color: var(--black);
+          color: var(--text-color);
         }
 
         .current-text {
           text-decoration: underline;
           text-underline-offset: 2px;
           opacity: 1;
-          font-weight: bold; // 当前字符加粗
+          font-weight: bold;
+          color: @primary-color; // 当前字符用主题色高亮
         }
       }
     }
