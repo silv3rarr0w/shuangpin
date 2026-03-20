@@ -741,17 +741,22 @@ function shortPinyin(pinyins: string[]) {
         }
 
         .bg-text {
+          // 未打字，高对比度
           opacity: 1;
+          font-size: inherit; // 确保继承全局字体大小
         }
 
         .done-text {
-          opacity: 0.2;
+          // 已打字，加深颜色，突出已完成
+          opacity: 1;
+          color: var(--black);
         }
 
         .current-text {
           text-decoration: underline;
           text-underline-offset: 2px;
-          opacity: 0.8;
+          opacity: 1;
+          font-weight: bold; // 当前字符加粗
         }
       }
     }
