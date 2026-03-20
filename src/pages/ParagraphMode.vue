@@ -22,12 +22,11 @@ import { getPinyinOf } from "../utils/hanzi";
 import { matchSpToPinyin } from "../utils/keyboard";
 import { TypingSummary } from "../utils/summary";
 
-// ---------- 指标与分段配置接口 ----------
+// ---------- 指标与分段配置接口（已移除每字击键） ----------
 interface CriteriaConfig {
   open: boolean;
   speed: number;
   accuracy: number;
-  pressPerHanzi: number;
   action: 'noop' | 'retry' | 'shuffle';
   paragraphSize: number;
 }
@@ -36,7 +35,6 @@ const criteria = ref<CriteriaConfig>({
   open: false,
   speed: 200,
   accuracy: 95,
-  pressPerHanzi: 3,
   action: 'noop',
   paragraphSize: 50,
 });
@@ -46,7 +44,10 @@ onMounted(() => {
   const saved = localStorage.getItem('paragraph-criteria');
   if (saved) {
     try {
-      criteria.value = JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      // 兼容旧配置，忽略 pressPerHanzi 字段
+      delete parsed.pressPerHanzi;
+      criteria.value = parsed;
     } catch (e) {
       console.error('Failed to load criteria config', e);
     }
@@ -309,7 +310,6 @@ function handleParagraphFinish() {
   console.log('Criteria open:', criteria.value.open);
   console.log('Speed:', summary.value.hanziPerMinutes, 'Threshold:', criteria.value.speed);
   console.log('Accuracy:', summary.value.totalAccuracy * 100, 'Threshold:', criteria.value.accuracy);
-  console.log('Press per Hanzi:', summary.value.pressPerHanzi, 'Threshold:', criteria.value.pressPerHanzi);
 
   // 一段打完，检查指标
   if (!criteria.value.open) {
@@ -320,12 +320,10 @@ function handleParagraphFinish() {
 
   const speed = summary.value.hanziPerMinutes;
   const accuracy = summary.value.totalAccuracy * 100;
-  const pressPerHanzi = summary.value.pressPerHanzi;
 
   let meet = true;
   if (criteria.value.speed > 0 && speed < criteria.value.speed) meet = false;
   if (criteria.value.accuracy > 0 && accuracy < criteria.value.accuracy) meet = false;
-  if (criteria.value.pressPerHanzi > 0 && pressPerHanzi > criteria.value.pressPerHanzi) meet = false;
 
   console.log('Meet criteria?', meet);
 
@@ -555,10 +553,6 @@ function shortPinyin(pinyins: string[]) {
             <input type="number" v-model.number="criteria.accuracy" min="0" max="100" step="1" class="criteria-input" />
           </div>
           <div class="criteria-item">
-            <span class="criteria-label">每字击键≤</span>
-            <input type="number" v-model.number="criteria.pressPerHanzi" min="0" step="0.1" class="criteria-input" />
-          </div>
-          <div class="criteria-item">
             <span class="criteria-label">未达标时</span>
             <select v-model="criteria.action" class="criteria-select">
               <option value="noop">不处理</option>
@@ -743,7 +737,7 @@ function shortPinyin(pinyins: string[]) {
         .bg-text {
           // 未打字，高对比度
           opacity: 1;
-          font-size: 50px; // 确保继承全局字体大小
+          font-size: inherit; // 继承根字体大小
           font-family: inherit; // 确保继承全局字体家族
         }
 
