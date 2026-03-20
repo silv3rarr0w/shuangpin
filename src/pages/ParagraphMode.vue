@@ -453,8 +453,8 @@ function shortPinyin(pinyins: string[]) {
 </script>
 
 <template>
-  <!-- 根元素绑定字体大小，以响应全局设置 -->
-  <div class="p-mode" :style="{ fontSize: settings.fontSize }">
+  <!-- 根元素绑定字体大小和字体家族，响应全局设置 -->
+  <div class="p-mode" :style="{ fontSize: settings.fontSize, fontFamily: settings.fontFamily }">
     <!-- 顶部区域：文章标题和菜单 -->
     <div class="display-area" :class="isEditing && 'editing'">
       <div class="p-title" :class="isEditing && 'editing'">
@@ -744,21 +744,20 @@ function shortPinyin(pinyins: string[]) {
           // 未打字，高对比度
           opacity: 1;
           font-size: inherit; // 确保继承全局字体大小
-          color: var(--text-color); // 使用主题色（暗黑模式自动切换）
+          font-family: inherit; // 确保继承全局字体家族
         }
 
         .done-text {
-          // 已打字，突出已完成
+          // 已打字，加深颜色，突出已完成
           opacity: 1;
-          color: var(--text-color);
+          color: var(--black);
         }
 
         .current-text {
           text-decoration: underline;
           text-underline-offset: 2px;
           opacity: 1;
-          font-weight: bold;
-          color: @primary-color; // 当前字符用主题色高亮
+          font-weight: bold; // 当前字符加粗
         }
       }
     }
