@@ -878,8 +878,8 @@ function shortPinyin(pinyins: string[]) {
         .switch {
           position: relative;
           display: inline-block;
-          width: 40px;
-          height: 20px;
+          width: 30px;
+          height: 10px;
           margin-left: 4px;
 
           input {
@@ -932,11 +932,11 @@ function shortPinyin(pinyins: string[]) {
       // 缩小键盘内部文字（通过深度选择器覆盖 Keyboard 组件的样式）
       :deep(.key-item) {
         .main-key {
-          font-size: 1.2rem;
+          font-size: 6px;
         }
         .follow-key,
         .lead-key {
-          font-size: 0.8rem;
+          font-size: 6px;
         }
       }
     }
