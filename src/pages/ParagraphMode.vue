@@ -878,8 +878,8 @@ function shortPinyin(pinyins: string[]) {
         .switch {
           position: relative;
           display: inline-block;
-          width: 30px;
-          height: 10px;
+          width: 40px;
+          height: 20px;
           margin-left: 4px;
 
           input {
