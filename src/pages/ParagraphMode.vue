@@ -751,7 +751,7 @@ function shortPinyin(pinyins: string[]) {
           text-decoration: underline;
           text-underline-offset: 2px;
           opacity: 1;
-          font-weight: bold; // 当前字符加粗
+          font-weight: 100; 
         }
       }
     }
