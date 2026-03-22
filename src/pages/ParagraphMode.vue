@@ -18,7 +18,7 @@ import { useStore } from "../store";
 import { storeToRefs } from "pinia";
 
 import rawArticles from "../utils/article.json";
-import { getPinyinOf } from "../utils/hanzi";
+import { getPinyinOf, isValidHanzi } from "../utils/hanzi"; // 新增 isValidHanzi 导入
 import { matchSpToPinyin } from "../utils/keyboard";
 import { TypingSummary } from "../utils/summary";
 
@@ -45,7 +45,6 @@ onMounted(() => {
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      // 兼容旧配置，忽略 pressPerHanzi 字段
       delete parsed.pressPerHanzi;
       criteria.value = parsed;
     } catch (e) {
@@ -119,12 +118,13 @@ function loadArticleText(article: Article) {
   };
 }
 
-// 跳到下一个有效汉字（非汉字字符跳过）
-function jumpToNextValidHanzi(index: number, text: string) {
-  while (index < text.length && getPinyinOf(text[index]).length === 0) {
-    index += 1;
+// 获取从 startIndex 开始（含）下一个有效汉字的索引，若无则返回 text.length
+function getNextValidHanziIndex(text: string, startIndex: number): number {
+  let idx = startIndex;
+  while (idx < text.length && !isValidHanzi(text[idx])) {
+    idx++;
   }
-  return index;
+  return idx;
 }
 
 const index = storeToRefs(store).currentArticleIndex;
@@ -150,9 +150,10 @@ function resetParagraphs(fullText: string) {
   paragraphs.value = splitIntoParagraphs(fullText);
   currentParagraphNo.value = 1;
   shuffledCurrentPara.value = null;
-  // 重置段内进度
+  // 重置段内进度到第一个有效汉字
+  const firstValid = getNextValidHanziIndex(currentParagraphText.value, 0);
   const info = loadArticleText(articles.value[index.value % articles.value.length]);
-  info.progress.currentIndex = 0;
+  info.progress.currentIndex = firstValid;
   console.log('Reset paragraphs, total paragraphs:', paragraphs.value.length);
 }
 
@@ -179,7 +180,13 @@ const article = computed(() => {
   }
 
   const currentParaText = currentParagraphText.value;
-  // 不再自动重置索引，让索引可以超过长度以便触发完成检测
+
+  // 调整当前索引到有效汉字位置
+  const adjustedIndex = getNextValidHanziIndex(currentParaText, info.progress.currentIndex);
+  if (adjustedIndex !== info.progress.currentIndex) {
+    info.progress.currentIndex = adjustedIndex;
+  }
+
   const currentChar = currentParaText[info.progress.currentIndex] ?? "";
   const pinyin = getPinyinOf(currentChar);
 
@@ -276,7 +283,11 @@ watchPostEffect(() => {
   if (isValidPinyin.value) {
     setTimeout(() => {
       pinyin.value = [];
-      article.value.progress.currentIndex += 1;
+      // 递增索引并调整到下一个有效汉字
+      let newIndex = article.value.progress.currentIndex + 1;
+      const paraText = currentParagraphText.value;
+      newIndex = getNextValidHanziIndex(paraText, newIndex);
+      article.value.progress.currentIndex = newIndex;
       isValidPinyin.value = false;
     }, 30);
   }
@@ -332,8 +343,11 @@ function handleParagraphFinish() {
     // 未达标，根据动作处理
     switch (criteria.value.action) {
       case 'retry':
-        // 重打本段：重置段内进度
-        article.value.progress.currentIndex = 0;
+        // 重打本段：重置段内进度到第一个有效汉字
+        {
+          const firstValid = getNextValidHanziIndex(currentParagraphText.value, 0);
+          article.value.progress.currentIndex = firstValid;
+        }
         break;
       case 'shuffle':
         // 乱序本段
@@ -361,7 +375,8 @@ function goToNextParagraph() {
   } else {
     currentParagraphNo.value = 1;
   }
-  article.value.progress.currentIndex = 0;
+  const firstValid = getNextValidHanziIndex(currentParagraphText.value, 0);
+  article.value.progress.currentIndex = firstValid;
   shuffledCurrentPara.value = null;
   console.log('Go to next paragraph:', currentParagraphNo.value);
 
@@ -396,7 +411,8 @@ function shuffleCurrentParagraph() {
 
   const shuffled = newLines.join('\n');
   shuffledCurrentPara.value = shuffled;
-  article.value.progress.currentIndex = 0;
+  const firstValid = getNextValidHanziIndex(shuffled, 0);
+  article.value.progress.currentIndex = firstValid;
   console.log('Shuffled current paragraph');
 }
 
@@ -595,10 +611,10 @@ function shortPinyin(pinyins: string[]) {
 .p-mode {
   display: flex;
   flex-direction: column;
-  height: 100vh; // 使用视口高度，让底部区域固定
+  height: 100vh;
 
   .display-area {
-    flex: 1; // 占据剩余空间
+    flex: 1;
     padding: 0 64px 32px 32px;
     display: flex;
     align-items: center;
@@ -726,7 +742,7 @@ function shortPinyin(pinyins: string[]) {
 
       .scroll-area {
         overflow-y: scroll;
-        height: 240px; // 增加高度，拉长打字区域
+        height: 240px;
         position: relative;
         margin: 8px 0;
 
@@ -735,14 +751,12 @@ function shortPinyin(pinyins: string[]) {
         }
 
         .bg-text {
-          // 未打字，高对比度
           opacity: 1;
-          font-size: 50px; // 继承根字体大小
-          font-family: inherit; // 确保继承全局字体家族
+          font-size: 50px;
+          font-family: inherit;
         }
 
         .done-text {
-          // 已打字，加深颜色，突出已完成
           opacity: 1;
           color: var(--black);
         }
@@ -751,7 +765,7 @@ function shortPinyin(pinyins: string[]) {
           text-decoration: underline;
           text-underline-offset: 2px;
           opacity: 1;
-          font-weight: 100; 
+          font-weight: 100;
         }
       }
     }
@@ -818,9 +832,8 @@ function shortPinyin(pinyins: string[]) {
     }
   }
 
-  // 底部区域（指标栏 + 键盘）
   .bottom-area {
-    flex-shrink: 0; // 防止被压缩
+    flex-shrink: 0;
     background: var(--gray-f8);
     border-top: 1px solid var(--gray-e0);
     padding: 8px 16px;
@@ -831,7 +844,7 @@ function shortPinyin(pinyins: string[]) {
       align-items: center;
       gap: 1rem;
       font-size: 14px;
-      margin-bottom: 8px; // 与键盘留出间距
+      margin-bottom: 8px;
 
       @media (max-width: 576px) {
         gap: 0.5rem;
@@ -862,7 +875,6 @@ function shortPinyin(pinyins: string[]) {
             width: 60px;
           }
 
-          // 暗黑模式适配（通过 CSS 变量自动切换）
           &:focus {
             border-color: @primary-color;
             outline: none;
@@ -923,13 +935,11 @@ function shortPinyin(pinyins: string[]) {
       }
     }
 
-    // 进一步缩小虚拟键盘
     .small-keyboard {
       transform: scale(0.7);
       transform-origin: bottom center;
-      margin-bottom: -15px; // 补偿缩放造成的空白
+      margin-bottom: -15px;
 
-      // 缩小键盘内部文字（通过深度选择器覆盖 Keyboard 组件的样式）
       :deep(.key-item) {
         .main-key {
           font-size: 6px;
@@ -945,8 +955,8 @@ function shortPinyin(pinyins: string[]) {
   .summary {
     position: absolute;
     right: var(--app-padding);
-    bottom: 140px; // 调整到底部栏上方
-    z-index: 1000; // 确保不被覆盖
+    bottom: 140px;
+    z-index: 1000;
     background: var(--white);
     padding: 8px 16px;
     border-radius: 8px;
