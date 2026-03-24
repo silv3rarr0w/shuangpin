@@ -120,7 +120,6 @@ const article = computed(() => {
     spHints: (store.mode().py2sp.get(pinyin.at(0) ?? "") ?? "").split(""),
     progress: info.progress,
     name: info.name,
-    rawText: info.text, // 原始文本，用于段落导航
   };
 });
 
@@ -255,75 +254,6 @@ function shortPinyin(pinyins: string[]) {
   }
   return ret.join("/");
 }
-
-// ========== 分段导航相关 ==========
-// 基于原始文本按换行符分割，计算每个段落的起止索引
-const paragraphList = computed(() => {
-  const text = article.value.rawText;
-  if (!text) return [];
-  const paragraphs: { startIndex: number; endIndex: number; text: string }[] = [];
-  let start = 0;
-  let idx = 0;
-  while (idx < text.length) {
-    if (text[idx] === '\n') {
-      // 遇到换行符，保存当前段落（可能为空）
-      paragraphs.push({
-        startIndex: start,
-        endIndex: idx,
-        text: text.slice(start, idx),
-      });
-      start = idx + 1;
-    }
-    idx++;
-  }
-  // 最后一段（如果没有换行符，整个文本作为一段）
-  if (start <= text.length) {
-    paragraphs.push({
-      startIndex: start,
-      endIndex: text.length,
-      text: text.slice(start),
-    });
-  }
-  return paragraphs;
-});
-
-// 当前所在段落索引（基于当前光标位置）
-const currentParagraphIndex = computed(() => {
-  const curIdx = article.value.progress.currentIndex;
-  const paras = paragraphList.value;
-  const found = paras.findIndex(p => curIdx >= p.startIndex && curIdx < p.endIndex);
-  return found !== -1 ? found : 0;
-});
-
-// 总段落数
-const totalParagraphs = computed(() => paragraphList.value.length);
-
-// 跳转到指定段落
-function goToParagraph(paraIdx: number) {
-  if (paraIdx < 0 || paraIdx >= totalParagraphs.value) return;
-  const targetStart = paragraphList.value[paraIdx].startIndex;
-  let newIndex = jumpToNextValidHanzi(targetStart, article.value.rawText);
-  // 如果该段落没有有效汉字，则停留在段落起始位置（通常不会发生，但防止异常）
-  if (newIndex >= paragraphList.value[paraIdx].endIndex) {
-    newIndex = targetStart;
-  }
-  // 更新当前进度索引
-  article.value.progress.currentIndex = newIndex;
-  // 重置输入状态
-  isValidPinyin.value = false;
-  pinyin.value = [];
-  // 触发滚动到新光标位置
-  setTimeout(() => scrollToFocus(), 30);
-}
-
-function goPrevParagraph() {
-  goToParagraph(currentParagraphIndex.value - 1);
-}
-
-function goNextParagraph() {
-  goToParagraph(currentParagraphIndex.value + 1);
-}
-// ========== 分段导航结束 ==========
 </script>
 
 <template>
@@ -366,26 +296,6 @@ function goNextParagraph() {
         </div>
       </div>
       <div v-if="!isEditing" class="text-area">
-        <!-- 分段导航控件（仅在分段模式开启时显示） -->
-        <div v-if="settings.enableParagraphMode" class="paragraph-nav">
-          <button
-            class="nav-btn"
-            :disabled="currentParagraphIndex <= 0"
-            @click="goPrevParagraph"
-          >
-            ◀
-          </button>
-          <span class="paragraph-info">
-            第 {{ currentParagraphIndex + 1 }} / {{ totalParagraphs }} 段
-          </span>
-          <button
-            class="nav-btn"
-            :disabled="currentParagraphIndex >= totalParagraphs - 1"
-            @click="goNextParagraph"
-          >
-            ▶
-          </button>
-        </div>
         <div class="scroll-area">
           <p
             v-for="(p, i) in article.text"
@@ -591,48 +501,6 @@ function goNextParagraph() {
         z-index: 999;
       }
 
-      .paragraph-nav {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 16px;
-        margin-bottom: 12px;
-        padding: 4px 8px;
-        background-color: var(--gray-1);
-        border-radius: 20px;
-        width: fit-content;
-        margin-left: auto;
-        margin-right: auto;
-        z-index: 10;
-        position: relative;
-
-        .nav-btn {
-          background: none;
-          border: none;
-          font-size: 16px;
-          cursor: pointer;
-          color: @primary-color;
-          padding: 4px 8px;
-          border-radius: 12px;
-          transition: all 0.2s;
-
-          &:hover:not(:disabled) {
-            background-color: var(--gray-3);
-          }
-
-          &:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-          }
-        }
-
-        .paragraph-info {
-          font-size: 14px;
-          font-weight: 500;
-          color: var(--black);
-        }
-      }
-
       .scroll-area {
         overflow-y: scroll;
         height: 144px;
@@ -654,7 +522,7 @@ function goNextParagraph() {
         }
 
         .done-text {
-          opacity: 1;
+          opacity: 0.2;
         }
 
         .current-text {
