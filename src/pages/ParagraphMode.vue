@@ -87,25 +87,6 @@ function jumpToNextValidHanzi(index: number, text: string) {
   return index;
 }
 
-/**
- * 获取所有非空段落在全文中的起始索引（绝对位置）
- */
-function getParagraphStarts(text: string): number[] {
-  const starts: number[] = [];
-  let offset = 0;
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    // 只记录非空段落（有实际内容的段落）
-    if (lines[i].length > 0) {
-      starts.push(offset);
-    }
-    offset += lines[i].length + 1; // +1 是换行符，最后一段不加？但 split 后最后一个换行符不影响
-  }
-  // 如果文本最后一个字符是换行符，split 会产生空串，此时 offset 多算了 1，但起始索引依然正确
-  // 但我们需要确保 starts 对应的段落与 text 中的实际段落一致（不含空段落）
-  return starts;
-}
-
 const index = storeToRefs(store).currentArticleIndex;
 const article = computed(() => {
   const articleIndex = index.value % articles.value.length;
@@ -120,7 +101,7 @@ const article = computed(() => {
   const currentHanzi = info.text[info.progress.currentIndex] ?? "";
   const pinyin = getPinyinOf(currentHanzi);
 
-  // 分段（包含空行，用于显示）
+  // 分段
   let text: [[string, number][]] = [[]];
   for (let i = 0; i < info.text.length; ++i) {
     const char = info.text[i];
@@ -131,9 +112,6 @@ const article = computed(() => {
     }
   }
 
-  // 获取所有非空段落的起始索引（用于手动切换）
-  const paragraphStarts = getParagraphStarts(info.text);
-
   return {
     type: info.type,
     text,
@@ -142,56 +120,9 @@ const article = computed(() => {
     spHints: (store.mode().py2sp.get(pinyin.at(0) ?? "") ?? "").split(""),
     progress: info.progress,
     name: info.name,
-    paragraphStarts, // 非空段落的起始索引数组
+    rawText: info.text, // 原始文本，用于段落导航
   };
 });
-
-// 当前所在段落索引（基于非空段落）
-const currentParagraphIndex = computed(() => {
-  const starts = article.value.paragraphStarts;
-  const currentPos = article.value.progress.currentIndex;
-  // 找到最后一个起始索引 <= currentPos 的段落
-  for (let i = starts.length - 1; i >= 0; i--) {
-    if (starts[i] <= currentPos) {
-      return i;
-    }
-  }
-  return 0;
-});
-
-// 总段落数（非空）
-const totalParagraphs = computed(() => article.value.paragraphStarts.length);
-
-// 是否显示分段控制（需设置中开启且至少有两个非空段落）
-const showParagraphControl = computed(() => {
-  return (settings.value as any)?.enableParagraphSegment === true && totalParagraphs.value > 1;
-});
-
-/**
- * 手动切换段落
- * @param delta -1: 上一段, 1: 下一段
- */
-function switchParagraph(delta: number) {
-  const starts = article.value.paragraphStarts;
-  const newIdx = currentParagraphIndex.value + delta;
-  if (newIdx < 0 || newIdx >= starts.length) return;
-
-  const targetStart = starts[newIdx];
-  const fullText = (() => {
-    const articleIndex = index.value % articles.value.length;
-    const info = loadArticleText(articles.value[articleIndex]);
-    return info.text;
-  })();
-
-  // 更新进度到目标段落的起始位置，并跳到有效汉字
-  const newPos = jumpToNextValidHanzi(targetStart, fullText);
-  const articleIndex = index.value % articles.value.length;
-  articles.value[articleIndex].progress.currentIndex = newPos;
-
-  // 重置拼音输入状态
-  pinyin.value = [];
-  isValidPinyin.value = false;
-}
 
 const articleMenuItems = computed(() => {
   return articles.value
@@ -324,6 +255,75 @@ function shortPinyin(pinyins: string[]) {
   }
   return ret.join("/");
 }
+
+// ========== 分段导航相关 ==========
+// 基于原始文本按换行符分割，计算每个段落的起止索引
+const paragraphList = computed(() => {
+  const text = article.value.rawText;
+  if (!text) return [];
+  const paragraphs: { startIndex: number; endIndex: number; text: string }[] = [];
+  let start = 0;
+  let idx = 0;
+  while (idx < text.length) {
+    if (text[idx] === '\n') {
+      // 遇到换行符，保存当前段落（可能为空）
+      paragraphs.push({
+        startIndex: start,
+        endIndex: idx,
+        text: text.slice(start, idx),
+      });
+      start = idx + 1;
+    }
+    idx++;
+  }
+  // 最后一段（如果没有换行符，整个文本作为一段）
+  if (start <= text.length) {
+    paragraphs.push({
+      startIndex: start,
+      endIndex: text.length,
+      text: text.slice(start),
+    });
+  }
+  return paragraphs;
+});
+
+// 当前所在段落索引（基于当前光标位置）
+const currentParagraphIndex = computed(() => {
+  const curIdx = article.value.progress.currentIndex;
+  const paras = paragraphList.value;
+  const found = paras.findIndex(p => curIdx >= p.startIndex && curIdx < p.endIndex);
+  return found !== -1 ? found : 0;
+});
+
+// 总段落数
+const totalParagraphs = computed(() => paragraphList.value.length);
+
+// 跳转到指定段落
+function goToParagraph(paraIdx: number) {
+  if (paraIdx < 0 || paraIdx >= totalParagraphs.value) return;
+  const targetStart = paragraphList.value[paraIdx].startIndex;
+  let newIndex = jumpToNextValidHanzi(targetStart, article.value.rawText);
+  // 如果该段落没有有效汉字，则停留在段落起始位置（通常不会发生，但防止异常）
+  if (newIndex >= paragraphList.value[paraIdx].endIndex) {
+    newIndex = targetStart;
+  }
+  // 更新当前进度索引
+  article.value.progress.currentIndex = newIndex;
+  // 重置输入状态
+  isValidPinyin.value = false;
+  pinyin.value = [];
+  // 触发滚动到新光标位置
+  setTimeout(() => scrollToFocus(), 30);
+}
+
+function goPrevParagraph() {
+  goToParagraph(currentParagraphIndex.value - 1);
+}
+
+function goNextParagraph() {
+  goToParagraph(currentParagraphIndex.value + 1);
+}
+// ========== 分段导航结束 ==========
 </script>
 
 <template>
@@ -366,6 +366,26 @@ function shortPinyin(pinyins: string[]) {
         </div>
       </div>
       <div v-if="!isEditing" class="text-area">
+        <!-- 分段导航控件（仅在分段模式开启时显示） -->
+        <div v-if="settings.enableParagraphMode" class="paragraph-nav">
+          <button
+            class="nav-btn"
+            :disabled="currentParagraphIndex <= 0"
+            @click="goPrevParagraph"
+          >
+            ◀
+          </button>
+          <span class="paragraph-info">
+            第 {{ currentParagraphIndex + 1 }} / {{ totalParagraphs }} 段
+          </span>
+          <button
+            class="nav-btn"
+            :disabled="currentParagraphIndex >= totalParagraphs - 1"
+            @click="goNextParagraph"
+          >
+            ▶
+          </button>
+        </div>
         <div class="scroll-area">
           <p
             v-for="(p, i) in article.text"
@@ -405,25 +425,6 @@ function shortPinyin(pinyins: string[]) {
           placeholder="键入范文……"
         />
       </div>
-    </div>
-
-    <!-- 分段手动切换控件 -->
-    <div v-if="showParagraphControl" class="paragraph-control">
-      <button
-        class="para-btn"
-        @click="switchParagraph(-1)"
-        :disabled="currentParagraphIndex <= 0"
-      >
-        ◀ 上一段
-      </button>
-      <span class="para-index">{{ currentParagraphIndex + 1 }} / {{ totalParagraphs }}</span>
-      <button
-        class="para-btn"
-        @click="switchParagraph(1)"
-        :disabled="currentParagraphIndex >= totalParagraphs - 1"
-      >
-        下一段 ▶
-      </button>
     </div>
 
     <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" />
@@ -590,6 +591,48 @@ function shortPinyin(pinyins: string[]) {
         z-index: 999;
       }
 
+      .paragraph-nav {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 12px;
+        padding: 4px 8px;
+        background-color: var(--gray-1);
+        border-radius: 20px;
+        width: fit-content;
+        margin-left: auto;
+        margin-right: auto;
+        z-index: 10;
+        position: relative;
+
+        .nav-btn {
+          background: none;
+          border: none;
+          font-size: 16px;
+          cursor: pointer;
+          color: @primary-color;
+          padding: 4px 8px;
+          border-radius: 12px;
+          transition: all 0.2s;
+
+          &:hover:not(:disabled) {
+            background-color: var(--gray-3);
+          }
+
+          &:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+          }
+        }
+
+        .paragraph-info {
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--black);
+        }
+      }
+
       .scroll-area {
         overflow-y: scroll;
         height: 144px;
@@ -611,7 +654,7 @@ function shortPinyin(pinyins: string[]) {
         }
 
         .done-text {
-          opacity: 0.4;
+          opacity: 1;
         }
 
         .current-text {
@@ -682,49 +725,6 @@ function shortPinyin(pinyins: string[]) {
           height: calc(var(--page-height) - 300px);
         }
       }
-    }
-  }
-
-  .paragraph-control {
-    position: fixed;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 20px;
-    align-items: center;
-    background: var(--white);
-    padding: 8px 20px;
-    border-radius: 40px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(4px);
-    z-index: 1000;
-
-    .para-btn {
-      background: @primary-color;
-      color: white;
-      border: none;
-      border-radius: 20px;
-      padding: 4px 12px;
-      font-size: 14px;
-      cursor: pointer;
-      transition: opacity 0.2s;
-
-      &:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-
-      &:not(:disabled):hover {
-        opacity: 0.8;
-      }
-    }
-
-    .para-index {
-      font-size: 14px;
-      font-weight: bold;
-      min-width: 60px;
-      text-align: center;
     }
   }
 
