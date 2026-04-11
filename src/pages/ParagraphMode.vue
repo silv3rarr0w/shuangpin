@@ -766,6 +766,7 @@ function shortPinyin(pinyins: string[]) {
           text-underline-offset: 2px;
           opacity: 1;
           font-weight: 100;
+          color: @primary-color;
         }
       }
     }
