@@ -10,6 +10,7 @@ const settings = storeToRefs(store).settings;
 const props = defineProps<{
   hints?: string[];
   validSeq?: (_: [string?, string?]) => boolean;
+  onKeyProcessed?: () => void;
 }>();
 
 const pressingKeys = ref(new Set<string>());
@@ -50,30 +51,28 @@ function resizeKeyboard() {
 }
 
 function pressKey(key: string) {
+  // 防止按住键时重复触发 keydown
+  if (pressingKeys.value.has(key)) {
+    return;
+  }
+
   pressingKeys.value.add(key);
 
   if (typeof navigator.vibrate === "function") {
     navigator.vibrate(50);
   }
-}
 
-function send() {
-  if (props.validSeq?.([keySeq.value.at(0), keySeq.value.at(1)])) {
-    keySeq.value = [];
-  }
-}
-
-function releaseKey(key: string, shouldSend = true) {
-  pressingKeys.value.delete(key);
-
+  // 核心输入处理：在按下时立即处理，而非抬起时
   if (key === "Backspace") {
     keySeq.value.pop();
     return send();
   }
 
-  if (!shouldSend || !store.mode().groupByKey.has(key as Char)) {
+  if (!store.mode().groupByKey.has(key as Char)) {
     return;
   }
+
+  props.onKeyProcessed?.();
 
   if (keySeq.value.length <= 2) {
     keySeq.value.push(key);
@@ -88,6 +87,16 @@ function releaseKey(key: string, shouldSend = true) {
   }
 
   send();
+}
+
+function send() {
+  if (props.validSeq?.([keySeq.value.at(0), keySeq.value.at(1)])) {
+    keySeq.value = [];
+  }
+}
+
+function releaseKey(key: string) {
+  pressingKeys.value.delete(key);
 }
 
 const keyLayout = computed(() => {
@@ -121,7 +130,7 @@ function keyItemClass(key: string) {
         @mousedown="pressKey(keyItem.main)"
         @touchstart.stop.prevent="pressKey(keyItem.main)"
         @mouseup="releaseKey(keyItem.main)"
-        @mouseout="releaseKey(keyItem.main, false)"
+        @mouseout="releaseKey(keyItem.main)"
         @touchend.stop.prevent="releaseKey(keyItem.main)"
       >
         <div class="main-content">
@@ -146,7 +155,7 @@ function keyItemClass(key: string) {
         @mousedown="pressKey('Backspace')"
         @touchstart.stop.prevent="pressKey('Backspace')"
         @mouseup="releaseKey('Backspace')"
-        @mouseout="releaseKey('Backspace', false)"
+        @mouseout="releaseKey('Backspace')"
         @touchend.stop.prevent="releaseKey('Backspace')"
       >
         <svg width="16" height="16" viewBox="0 0 48 48" fill="none">

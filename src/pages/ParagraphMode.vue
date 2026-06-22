@@ -9,7 +9,6 @@ import {
   watch,
   watchPostEffect,
   onActivated,
-  onDeactivated,
   onMounted,
   computed,
   nextTick,
@@ -67,17 +66,9 @@ const settings = storeToRefs(store).settings;
 
 const summary = ref(new TypingSummary());
 
-function onKeyPressed() {
+function onKeyProcessed() {
   summary.value.onKeyPressed();
 }
-
-onActivated(() => {
-  document.addEventListener("keypress", onKeyPressed);
-});
-
-onDeactivated(() => {
-  document.removeEventListener("keypress", onKeyPressed);
-});
 
 // 初始化文章列表（补全 Progress 必需属性）
 (function checkArticles() {
@@ -590,7 +581,7 @@ function shortPinyin(pinyins: string[]) {
       </div>
 
       <!-- 虚拟键盘（进一步缩小） -->
-      <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" class="small-keyboard" />
+      <Keyboard v-if="!isEditing" :valid-seq="onSeq" :hints="article.spHints" :on-key-processed="onKeyProcessed" class="small-keyboard" />
     </div>
 
     <!-- 统计摘要（固定在右下角） -->

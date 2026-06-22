@@ -6,8 +6,6 @@ import TypeSummary from "../components/TypeSummary.vue";
 import MenuList from "../components/MenuList.vue";
 import Sidebar from "../components/ProgressiveSidebar.vue";
 import {
-  onActivated,
-  onDeactivated,
   ref,
   watchPostEffect,
   computed,
@@ -93,17 +91,9 @@ function onMenuChange(i: number) {
   }
 }
 
-function onKeyPressed() {
+function onKeyProcessed() {
   summary.value.onKeyPressed();
 }
-
-onActivated(() => {
-  document.addEventListener("keypress", onKeyPressed);
-});
-
-onDeactivated(() => {
-  document.removeEventListener("keypress", onKeyPressed);
-});
 
 const answer = computed(() => {
   const pys = getSinglePinyinOf(hanziSeq.value.at(-1) ?? "");
@@ -227,7 +217,7 @@ watch(
     </div>
 
     <div class="single-keyboard">
-      <Keyboard :valid-seq="onSeq" :hints="hints" />
+      <Keyboard :valid-seq="onSeq" :hints="hints" :on-key-processed="onKeyProcessed" />
     </div>
 
     <div class="summary">
