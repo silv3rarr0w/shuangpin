@@ -59,6 +59,25 @@ watch(criteria, (val) => {
   console.log('Criteria saved:', val);
 }, { deep: true });
 
+// 开关切换时自动重新分段
+watch(() => criteria.value.open, (isOpen) => {
+  const fullText = article.value.originalFullText;
+  if (!fullText) return;
+
+  if (isOpen) {
+    // 开启指标：按当前每段字数重新拆分
+    resetParagraphs(fullText);
+  } else {
+    // 关闭指标：合并为全文一段
+    paragraphs.value = [fullText];
+    currentParagraphNo.value = 1;
+    shuffledCurrentPara.value = null;
+    const firstValid = getNextValidHanziIndex(fullText, article.value.progress.currentIndex);
+    article.value.progress.currentIndex = firstValid;
+    console.log('Criteria closed, merged into single paragraph');
+  }
+});
+
 // ---------- Store 和状态 ----------
 const store = useStore();
 const articles = storeToRefs(store).articles;
@@ -170,9 +189,14 @@ const article = computed(() => {
   const articleIndex = index.value % articles.value.length;
   const info = loadArticleText(articles.value[articleIndex]);
 
-  // 如果是第一次加载或全文变化，重新分段
+  // 如果是第一次加载，按开关状态决定是否分段
   if (paragraphs.value.length === 0) {
-    resetParagraphs(info.text);
+    if (criteria.value.open) {
+      resetParagraphs(info.text);
+    } else {
+      paragraphs.value = [info.text];
+      currentParagraphNo.value = 1;
+    }
   }
 
   const currentParaText = currentParagraphText.value;
