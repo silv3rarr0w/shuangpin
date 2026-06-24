@@ -618,7 +618,6 @@ function shortPinyin(pinyins: string[]) {
       <TypeSummary
         :speed="summary.hanziPerMinutes"
         :accuracy="summary.totalAccuracy"
-        :avgpress="summary.pressPerHanzi"
         :kps="summary.keysPerSecond"
       />
     </div>
