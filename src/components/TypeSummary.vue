@@ -2,7 +2,8 @@
 export interface TypeSummaryProps {
   accuracy: number,
   speed: number,
-  avgpress: number
+  avgpress: number,
+  kps: number
 }
 
 const props = defineProps<TypeSummaryProps>()
@@ -18,6 +19,9 @@ const props = defineProps<TypeSummaryProps>()
     </div>
     <div class="avgpress">
       {{ props.avgpress.toFixed(2) }} 次每字
+    </div>
+    <div class="kps">
+      {{ props.kps.toFixed(2) }} 键每秒
     </div>
   </div>
 </template>

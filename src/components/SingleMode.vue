@@ -225,6 +225,7 @@ watch(
         :speed="summary.hanziPerMinutes"
         :accuracy="summary.slidingAccuracy"
         :avgpress="summary.pressPerHanzi"
+        :kps="summary.keysPerSecond"
       />
     </div>
     <Sidebar

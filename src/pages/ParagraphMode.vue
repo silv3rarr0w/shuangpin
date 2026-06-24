@@ -67,6 +67,10 @@ const settings = storeToRefs(store).settings;
 const summary = ref(new TypingSummary());
 
 function onKeyProcessed() {
+  if (pendingSummaryReset.value) {
+    summary.value = new TypingSummary();
+    pendingSummaryReset.value = false;
+  }
   summary.value.onKeyPressed();
 }
 
@@ -124,6 +128,7 @@ const index = storeToRefs(store).currentArticleIndex;
 const paragraphs = ref<string[]>([]);
 const currentParagraphNo = ref(1);
 const shuffledCurrentPara = ref<string | null>(null);
+const pendingSummaryReset = ref(false);
 
 // 根据文章全文和段落大小重新计算段落
 function splitIntoParagraphs(fullText: string): string[] {
@@ -354,9 +359,9 @@ function handleParagraphFinish() {
     goToNextParagraph();
   }
 
-  // 重置统计（下一段重新累计）
-  summary.value = new TypingSummary();
-  console.log('Summary reset');
+  // 标记统计待清空：下次击键时再清空，而非立即清空
+  pendingSummaryReset.value = true;
+  console.log('Summary pending reset on next keystroke');
 }
 
 // 进入下一段
@@ -590,6 +595,7 @@ function shortPinyin(pinyins: string[]) {
         :speed="summary.hanziPerMinutes"
         :accuracy="summary.totalAccuracy"
         :avgpress="summary.pressPerHanzi"
+        :kps="summary.keysPerSecond"
       />
     </div>
   </div>

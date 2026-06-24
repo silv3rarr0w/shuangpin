@@ -70,6 +70,14 @@ export class TypingSummary {
     return windowPresses / correctItems.length;
   }
 
+  get keysPerSecond() {
+    if (this.history.length === 0) return 0;
+    const totalDuration = this.history.reduce((sum, h) => sum + h.duration, 0);
+    const totalPresses = this.history.reduce((sum, h) => sum + h.presses, 0);
+    if (totalDuration === 0) return 0;
+    return (totalPresses / totalDuration) * 1000;
+  }
+
   get totalAccuracy() {
     return this.totalValidMatches === 0
       ? 0
